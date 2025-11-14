@@ -45,13 +45,16 @@ function resolveConfig(): MilvusConfig | undefined {
     searchParams: {
       nprobe: Number(process.env.MILVUS_PARAM_NPROBE ?? 16),
     },
-    outputFields: (
-      process.env.MILVUS_OUTPUT_FIELDS ??
-      "fqn,summary,module,kind,references,last_modified_days"
-    )
-      .split(",")
-      .map((field) => field.trim())
-      .filter(Boolean),
+    outputFields: [
+      "index_level",
+      "repo_name",
+      "module_name",
+      "package_name",
+      "symbol_name",
+      "summary",
+      "metadata",
+      "fqn",
+    ],
     embeddingModel:
       process.env.IEC_EMBED_MODEL ??
       process.env.EMBED_MODEL ??
@@ -98,18 +101,37 @@ function fallbackEmbedding(text: string, dimension = 384): number[] {
   return vector.map((val) => Number((val / norm).toFixed(6)));
 }
 
+function parseMetadata(metadata?: string) {
+  if (!metadata) return undefined;
+  try {
+    return JSON.parse(metadata);
+  } catch {
+    return undefined;
+  }
+}
+
 function formatRecords(raw: any[]): SymbolRecord[] {
-  return raw.map((row) => ({
-    fqn: row.fqn ?? row.id ?? "unknown",
-    kind: (row.kind ?? "CLASS") as SymbolRecord["kind"],
-    module: row.module ?? "default",
-    summary: row.summary ?? "",
-    scoreHints: {
-      references: row.references ?? row.reference_count,
-      lastModifiedDays:
-        row.last_modified_days ?? row.lastModifiedDays ?? undefined,
-    },
-  }));
+  return raw.map((row) => {
+    const parsed = parseMetadata(row.metadata);
+    const level = row.index_level ?? parsed?.level ?? "class";
+    let kind: SymbolRecord["kind"] = "CLASS";
+    if (level === "method") kind = "METHOD";
+    else if (level === "module") kind = "MODULE";
+    else if (level === "repository") kind = "REPOSITORY";
+
+    return {
+      fqn: row.fqn ?? row.symbol_name ?? row.repo_name ?? "unknown",
+      kind,
+      module: row.module_name ?? parsed?.module ?? "default",
+      summary: row.summary ?? parsed?.summary ?? "",
+      metadata: parsed,
+      indexLevel: level,
+      scoreHints: {
+        references: parsed?.references ?? parsed?.referenceCount,
+        lastModifiedDays: parsed?.lastModifiedDays,
+      },
+    };
+  });
 }
 
 async function runPythonSearch(payload: Record<string, unknown>): Promise<any[]> {
@@ -164,6 +186,7 @@ export function createMilvusSearchClient(): MilvusSearchHandle | undefined {
           vector: embedding,
           limit,
           moduleFilter: args.moduleFilter,
+          levels: ["class", "method"],
           milvusAddress: config.address,
           metricType: config.metricType,
           searchParams: config.searchParams,

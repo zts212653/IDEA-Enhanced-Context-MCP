@@ -28,15 +28,26 @@ export async function generateEmbedding(
 
 export function symbolToEmbeddingText(symbol: SymbolRecord): string {
   const lines = [
+    `Repository: ${symbol.repoName}`,
+    `Module: ${symbol.module} (${symbol.modulePath})`,
     `Symbol: ${symbol.fqn}`,
     `Kind: ${symbol.kind}`,
-    `Module: ${symbol.module}`,
+    `Visibility: ${symbol.typeInfo.visibility}`,
+    `Modifiers: ${symbol.typeInfo.modifiers.join(" ") || "none"}`,
     `Package: ${symbol.packageName}`,
     `Summary: ${symbol.summary}`,
   ];
 
   if (symbol.javadoc) {
     lines.push(`Javadoc: ${symbol.javadoc}`);
+  }
+
+  if (symbol.annotations.length > 0) {
+    lines.push(
+      `Annotations: ${symbol.annotations
+        .map((ann) => ann.fqn ?? ann.name)
+        .join(", ")}`,
+    );
   }
 
   if (symbol.extends && symbol.extends.length > 0) {
@@ -47,13 +58,37 @@ export function symbolToEmbeddingText(symbol: SymbolRecord): string {
     lines.push(`Implements: ${symbol.implements.join(", ")}`);
   }
 
-  if (symbol.methods.length > 0) {
-    lines.push("Methods:");
-    for (const method of symbol.methods.slice(0, 15)) {
+  if (symbol.fields.length > 0) {
+    lines.push("Fields:");
+    for (const field of symbol.fields.slice(0, 10)) {
       lines.push(
-        `- ${method.signature} :: ${method.javadoc ?? "no docs"} (visibility: ${
-          method.visibility
-        })`,
+        `- ${field.type} ${field.name} (${field.annotations
+          .map((ann) => ann.name)
+          .join(", ")})`,
+      );
+    }
+  }
+
+  if (symbol.methods.length > 0) {
+    lines.push("Key methods:");
+    for (const method of symbol.methods.slice(0, 10)) {
+      lines.push(
+        `- ${method.signature} :: returns ${
+          method.returnTypeFqn ?? method.returnType
+        }`,
+      );
+    }
+  }
+
+  if (symbol.springInfo?.isSpringBean) {
+    lines.push(
+      `Spring bean type: ${symbol.springInfo.beanType}, bean name: ${symbol.springInfo.beanName}`,
+    );
+    if (symbol.springInfo.autoWiredDependencies.length > 0) {
+      lines.push(
+        `Auto-wired dependencies: ${symbol.springInfo.autoWiredDependencies.join(
+          ", ",
+        )}`,
       );
     }
   }
