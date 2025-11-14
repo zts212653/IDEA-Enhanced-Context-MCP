@@ -9,7 +9,13 @@ import {
   type MilvusSearchHandle,
   applyContextBudget,
 } from "./searchPipeline.js";
-import type { SymbolRecord } from "./types.js";
+import type {
+  SymbolRecord,
+  SearchHit,
+  RelationInfo,
+  HierarchyInfo,
+  SpringInfo,
+} from "./types.js";
 
 const mockSymbols: SymbolRecord[] = [
   {
@@ -95,16 +101,60 @@ const server = new McpServer(
   {
     capabilities: { tools: {} },
     instructions:
-      "Mock search endpoint for IDEA semantic index. Replace searchSymbols() with Bridge+Milvus integration.",
+      "Performs staged semantic search backed by IntelliJ PSI uploads (bridge) and Milvus embeddings. Query modules/classes/methods and review module hits separately before final context delivery.",
   },
 );
+
+const relationInfoSchema = z
+  .object({
+    calls: z.array(z.string()).optional(),
+    calledBy: z.array(z.string()).optional(),
+    references: z.array(z.string()).optional(),
+  })
+  .partial();
+
+const hierarchyInfoSchema = z
+  .object({
+    superClass: z.string().nullable().optional(),
+    interfaces: z.array(z.string()).optional(),
+  })
+  .partial();
+
+const springInfoSchema = z
+  .object({
+    isSpringBean: z.boolean().optional(),
+    beanType: z.string().nullable().optional(),
+    beanName: z.string().nullable().optional(),
+    autoWiredDependencies: z.array(z.string()).optional(),
+    annotations: z.array(z.string()).optional(),
+  })
+  .partial();
+
+const locationSchema = z
+  .object({
+    repoName: z.string().nullable().optional(),
+    module: z.string().nullable().optional(),
+    modulePath: z.string().nullable().optional(),
+    packageName: z.string().nullable().optional(),
+    filePath: z.string().nullable().optional(),
+  })
+  .partial();
 
 const hitSchema = z.object({
   fqn: z.string(),
   kind: z.enum(["CLASS", "INTERFACE", "METHOD", "MODULE", "REPOSITORY"]),
   module: z.string(),
+  repoName: z.string().nullable().optional(),
+  modulePath: z.string().nullable().optional(),
+  packageName: z.string().nullable().optional(),
+  indexLevel: z.string().nullable().optional(),
   summary: z.string(),
   score: z.number().min(0).max(1).optional(),
+  relations: relationInfoSchema.optional(),
+  hierarchy: hierarchyInfoSchema.optional(),
+  springInfo: springInfoSchema.optional(),
+  metadata: z.record(z.any()).optional(),
+  location: locationSchema.optional(),
   scoreHints: z
     .object({
       references: z.number().int().nonnegative().optional(),
@@ -114,10 +164,35 @@ const hitSchema = z.object({
     .optional(),
 });
 
+const moduleStatsSchema = z
+  .object({
+    classCount: z.number().optional(),
+    packageCount: z.number().optional(),
+    springBeans: z.number().optional(),
+    topPackages: z.array(z.string()).optional(),
+    sampleDependencies: z.array(z.string()).optional(),
+    relationSummary: z.record(z.any()).optional(),
+  })
+  .partial();
+
+const moduleCandidateSchema = hitSchema.extend({
+  stats: moduleStatsSchema.optional(),
+});
+
+const deliveredResultSchema = hitSchema.extend({
+  context: z
+    .object({
+      dependencies: z.any().optional(),
+      quality: z.any().optional(),
+    })
+    .optional(),
+});
+
 const stageSummarySchema = z.object({
   name: z.enum(["bridge", "milvus-module", "milvus-class", "fallback"]),
   hitCount: z.number().int().nonnegative(),
   kinds: z.array(z.string()).optional(),
+  levels: z.array(z.string()).optional(),
 });
 
 const searchResultSchema = z.object({
@@ -129,31 +204,149 @@ const searchResultSchema = z.object({
   deliveredCount: z.number().int().min(0),
   omittedCount: z.number().int().min(0),
   stages: z.array(stageSummarySchema),
-  moduleCandidates: z.array(hitSchema),
-  deliveredResults: z.array(hitSchema),
+  moduleCandidates: z.array(moduleCandidateSchema),
+  deliveredResults: z.array(deliveredResultSchema),
   budget: z.object({
     tokenLimit: z.number().int().positive(),
     usedTokens: z.number().int().nonnegative(),
   }),
 });
 
+function toStringArray(value: unknown, limit = 8): string[] | undefined {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry))
+      .filter((entry) => entry.length > 0)
+      .slice(0, limit);
+  }
+  if (typeof value === "string" && value.length > 0) {
+    return [value];
+  }
+  return undefined;
+}
+
+function pickString(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function describeHit(hit: SearchHit) {
+  const metadata = (hit.metadata ?? {}) as Record<string, unknown>;
+  const repoName =
+    hit.repoName ?? pickString(metadata, "repoName") ?? pickString(metadata, "repo_name");
+  const modulePath =
+    hit.modulePath ?? pickString(metadata, "modulePath") ?? pickString(metadata, "module_path");
+  const packageName =
+    hit.packageName ??
+    pickString(metadata, "packageName") ??
+    pickString(metadata, "package");
+  const filePath =
+    pickString(metadata, "filePath") ?? pickString(metadata, "relativePath");
+  const hierarchy =
+    hit.hierarchy ??
+    ((metadata.hierarchy as HierarchyInfo | undefined) ??
+      (metadata.hierarchySummary as HierarchyInfo | undefined));
+  const relations =
+    hit.relations ?? (metadata.relations as RelationInfo | undefined);
+  const springInfo =
+    hit.springInfo ??
+    ((metadata.spring as SpringInfo | undefined) ??
+      (metadata.springInfo as SpringInfo | undefined));
+
+  return {
+    fqn: hit.fqn,
+    kind: hit.kind,
+    repoName,
+    module: hit.module,
+    modulePath,
+    packageName,
+    summary: hit.summary,
+    indexLevel: hit.indexLevel,
+    score: hit.score,
+    relations,
+    hierarchy,
+    springInfo,
+    metadata,
+    location: {
+      repoName,
+      module: hit.module,
+      modulePath,
+      packageName,
+      filePath,
+    },
+  };
+}
+
+function describeModuleCandidate(hit: SearchHit) {
+  const base = describeHit(hit);
+  const metadata = base.metadata ?? {};
+  const stats = {
+    classCount:
+      typeof metadata.classCount === "number"
+        ? metadata.classCount
+        : typeof metadata.classes === "number"
+        ? metadata.classes
+        : undefined,
+    packageCount:
+      typeof metadata.packageCount === "number"
+        ? metadata.packageCount
+        : undefined,
+    springBeans:
+      typeof metadata.springBeans === "number"
+        ? metadata.springBeans
+        : undefined,
+    topPackages: toStringArray(metadata.packages),
+    sampleDependencies: toStringArray(metadata.dependencies),
+    relationSummary: metadata.relationSummary,
+  };
+  return {
+    ...base,
+    stats:
+      Object.values(stats).some((value) =>
+        Array.isArray(value) ? value.length > 0 : value !== undefined,
+      )
+        ? stats
+        : undefined,
+  };
+}
+
+function describeDeliveredHit(hit: SearchHit) {
+  const base = describeHit(hit);
+  const metadata = base.metadata ?? {};
+  const context = {
+    dependencies: metadata.dependencies,
+    quality: metadata.quality,
+  };
+  const hasContext =
+    context.dependencies !== undefined || context.quality !== undefined;
+  return {
+    ...base,
+    context: hasContext ? context : undefined,
+  };
+}
+
 server.registerTool(
   "search_java_class",
   {
-    title: "IDEA semantic search (mock)",
+    title: "IDEA staged semantic search",
     description:
-      "Search Java classes or methods using IDEA semantic index. Currently returns static data pending Bridge hookup.",
+      "Search PSI-enriched modules/classes/methods via staged pipeline (bridge → Milvus). Returns module hits plus context-budgeted results including hierarchy/relations metadata.",
     inputSchema: searchArgsSchema,
     outputSchema: searchResultSchema,
   },
   async (args) => {
     const outcome = await searchPipeline.search(args);
     const budget = applyContextBudget(outcome.finalResults);
-    const moduleCandidates = (outcome.moduleResults ?? []).slice(0, 5);
+    const moduleCandidates = (outcome.moduleResults ?? [])
+      .slice(0, 5)
+      .map(describeModuleCandidate);
     const stages = outcome.stages.map((stage) => ({
       name: stage.name,
       hitCount: stage.hits.length,
       kinds: Array.from(new Set(stage.hits.map((hit) => hit.kind))),
+      levels: Array.from(
+        new Set(stage.hits.map((hit) => hit.indexLevel ?? "unknown")),
+      ),
     }));
 
     const payload = {
@@ -166,7 +359,7 @@ server.registerTool(
       omittedCount: budget.omittedCount,
       stages,
       moduleCandidates,
-      deliveredResults: budget.delivered,
+      deliveredResults: budget.delivered.map(describeDeliveredHit),
       budget: {
         tokenLimit: budget.tokenLimit,
         usedTokens: budget.usedTokens,

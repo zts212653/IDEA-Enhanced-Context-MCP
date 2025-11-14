@@ -132,6 +132,31 @@ docs: add multi-agent collaboration guidelines (by claude pass1)
 
 ---
 
+### Codex Pass 3: PSI Ingestion Metadata + MCP Output Upgrade
+
+**Session Context**: After PSI uploads became the default, we needed Milvus ingestion/search to consume the richer metadata and surface it through the MCP tool.
+
+**Files Changed**:
+- `doc/psi-integration-plan.md`
+- `idea-bridge/src/{embedding.ts,indexer.ts,scripts/ingestMilvus.ts,types.ts}`
+- `mcp-server/src/{bridgeClient.ts,index.ts,milvusClient.ts,types.ts}`
+
+**What / Why**:
+1. **Plan checkpoint** – Updated the PSI integration plan’s “Current Snapshot” and bridge track to note that PSI cache + schema extensions are complete, leaving streaming/auditing as follow-up work.
+2. **Milvus ingestion refresh** – `symbolToEmbeddingText` now includes hierarchy traits, relation summaries, and quality stats so embeddings pick up PSI context. Ingestion metadata tracks repo/module Spring bean counts, hierarchy summaries, and relation totals; `QualityMetrics` now includes annotation counts so regex fallback behaves more like PSI exports. Added a dry-run switch (`DISABLE_MILVUS` / `MILVUS_DRY_RUN`) for inspection without DB access.
+3. **End-to-end ingest verification** – Ran `npm run ingest:milvus` (with `MILVUS_RESET=1`) against `~/projects/spring-petclinic-microservices`. 210 repo/module/class/method rows inserted into Milvus; ~13 prompts hit Ollama’s `-Inf` bug and fell back to deterministic embeddings (noted in logs).
+4. **MCP metadata exposure** – `mcp-server` now parses repo/module/package info, hierarchy, relations, and Spring hints from Milvus metadata, returning module candidates with stats and final results annotated with location/context info. Tool description/instructions updated to reflect the staged PSI-backed pipeline, and stage summaries now list index levels.
+
+**Testing**:
+- `idea-bridge`: `npm run build` ✅, `MILVUS_RESET=1 npm run ingest:milvus` ✅ (writes to live Milvus; dry-run path also exercised earlier).
+- `mcp-server`: `npm run build`, `npm run test` (Vitest) ✅.
+
+**Next Steps**:
+1. Claude can focus testing on query behavior (e.g., ensure module hits list top packages/dependencies and delivered results include hierarchy/relations).
+2. Implement exporter enhancements (call graphs, incremental export) per plan section A, then re-ingest and validate search quality again.
+
+---
+
 ## Template for Future Entries
 
 ```markdown
