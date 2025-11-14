@@ -39,24 +39,54 @@ def ensure_collection(payload):
             max_length=512,
         ),
         FieldSchema(
-            name=vector_field,
-            dtype=DataType.FLOAT_VECTOR,
-            dim=dimension,
-        ),
-        FieldSchema(
-            name="module",
+            name="index_level",
             dtype=DataType.VARCHAR,
-            max_length=128,
+            max_length=32,
         ),
         FieldSchema(
-            name="packageName",
+            name="repo_name",
+            dtype=DataType.VARCHAR,
+            max_length=256,
+        ),
+        FieldSchema(
+            name="module_name",
+            dtype=DataType.VARCHAR,
+            max_length=256,
+        ),
+        FieldSchema(
+            name="module_path",
             dtype=DataType.VARCHAR,
             max_length=512,
+        ),
+        FieldSchema(
+            name="package_name",
+            dtype=DataType.VARCHAR,
+            max_length=512,
+        ),
+        FieldSchema(
+            name="symbol_name",
+            dtype=DataType.VARCHAR,
+            max_length=512,
+        ),
+        FieldSchema(
+            name="fqn",
+            dtype=DataType.VARCHAR,
+            max_length=1024,
         ),
         FieldSchema(
             name="summary",
             dtype=DataType.VARCHAR,
             max_length=2048,
+        ),
+        FieldSchema(
+            name="metadata",
+            dtype=DataType.VARCHAR,
+            max_length=8192,
+        ),
+        FieldSchema(
+            name=vector_field,
+            dtype=DataType.FLOAT_VECTOR,
+            dim=dimension,
         ),
     ]
 

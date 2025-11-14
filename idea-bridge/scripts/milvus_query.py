@@ -27,10 +27,28 @@ def search(payload: dict):
     search_params = payload.get("searchParams") or {}
     params["params"].update(search_params)
 
-    expr = None
+    expr_parts = []
     module_filter = payload.get("moduleFilter")
     if module_filter:
-        expr = f'module == "{module_filter}"'
+        expr_parts.append(f'module_name == "{module_filter}"')
+
+    levels = payload.get("levels")
+    if levels:
+        level_expr = " or ".join([f'index_level == "{level}"' for level in levels])
+        expr_parts.append(f"({level_expr})")
+
+    expr = " and ".join(expr_parts) if expr_parts else None
+
+    output_fields = payload.get("outputFields") or [
+        "index_level",
+        "repo_name",
+        "module_name",
+        "package_name",
+        "symbol_name",
+        "summary",
+        "metadata",
+        "fqn",
+      ]
 
     results = collection.search(
         data=[payload["vector"]],
@@ -38,7 +56,7 @@ def search(payload: dict):
         param=params,
         limit=payload.get("limit", 5),
         expr=expr,
-        output_fields=payload.get("outputFields") or ["fqn", "summary", "module"],
+        output_fields=output_fields,
     )
 
     hits = []

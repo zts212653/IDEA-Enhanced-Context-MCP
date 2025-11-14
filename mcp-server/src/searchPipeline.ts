@@ -5,6 +5,7 @@ export type SearchArguments = {
   query: string;
   limit?: number;
   moduleFilter?: string;
+  preferredLevels?: string[];
 };
 
 export interface MilvusSearchHandle {
@@ -91,9 +92,21 @@ export function createSearchPipeline({
       return bridgeResults;
     }
 
-    const milvusResults = await tryMilvus(args);
-    if (milvusResults && milvusResults.length > 0) {
-      return milvusResults;
+    const moduleFirst = await tryMilvus({
+      ...args,
+      preferredLevels: ["module"],
+      limit: 5,
+    });
+    if (moduleFirst && moduleFirst.length > 0) {
+      return moduleFirst;
+    }
+
+    const classResults = await tryMilvus({
+      ...args,
+      preferredLevels: ["class", "method"],
+    });
+    if (classResults && classResults.length > 0) {
+      return classResults;
     }
 
     return rankSymbols(fallbackSymbols, args);
