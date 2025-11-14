@@ -72,7 +72,8 @@ export interface QualityMetrics {
   hasJavadoc: boolean;
   methodCount: number;
   fieldCount: number;
-  summaryLength: number;
+  summaryLength?: number;
+  annotationCount?: number;
 }
 
 export interface SymbolRecord {

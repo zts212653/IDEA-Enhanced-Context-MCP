@@ -192,6 +192,7 @@ function extractSymbolsFromFile(
         methodCount: methods.length,
         fieldCount: fields.length,
         summaryLength: summary.length,
+        annotationCount: annotations.length,
       },
       lineStart,
       lineEnd,

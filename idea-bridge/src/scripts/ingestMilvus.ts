@@ -99,20 +99,28 @@ function buildRepoEntry(
     module: mod.moduleName,
     path: mod.modulePath,
     classCount: mod.classes.length,
+    springBeans: mod.classes.filter((cls) => cls.springInfo?.isSpringBean).length,
   }));
+  const totalSpringBeans = moduleSummaries.reduce(
+    (sum, mod) => sum + mod.springBeans,
+    0,
+  );
 
   const metadata = {
     moduleCount: modules.size,
     classCount,
     modules: truncateArray(moduleSummaries, 12),
+    springBeans: totalSpringBeans,
   };
 
   const embeddingText = [
     `Repository ${repoName}`,
     `Modules: ${modules.size}`,
     `Total classes: ${classCount}`,
+    `Total Spring beans: ${totalSpringBeans}`,
     ...truncateArray(moduleSummaries, 8).map(
-      (m) => `Module ${m.module} (${m.classCount} classes)`,
+      (m) =>
+        `Module ${m.module} (${m.classCount} classes, ${m.springBeans} beans)`,
     ),
   ].join("\n");
 
@@ -132,8 +140,29 @@ function buildModuleEntry(repoName: string, module: ModuleGroup): IndexEntry {
   const packages = new Set(module.classes.map((cls) => cls.packageName));
   const springBeans = module.classes.filter((cls) => cls.springInfo?.isSpringBean);
   const dependencies = new Set<string>();
+  const relationStats = {
+    calls: 0,
+    calledBy: 0,
+    references: 0,
+  };
+  const hierarchySummary = {
+    superClasses: new Set<string>(),
+    interfaces: new Set<string>(),
+  };
   for (const cls of module.classes) {
     cls.dependencies.imports.forEach((dep) => dependencies.add(dep));
+    cls.relations?.calls?.length &&
+      (relationStats.calls += cls.relations.calls.length);
+    cls.relations?.calledBy?.length &&
+      (relationStats.calledBy += cls.relations.calledBy.length);
+    cls.relations?.references?.length &&
+      (relationStats.references += cls.relations.references.length);
+    if (cls.hierarchy?.superClass) {
+      hierarchySummary.superClasses.add(cls.hierarchy.superClass);
+    }
+    cls.hierarchy?.interfaces.forEach((item) =>
+      hierarchySummary.interfaces.add(item),
+    );
   }
 
   const metadata = {
@@ -147,6 +176,11 @@ function buildModuleEntry(repoName: string, module: ModuleGroup): IndexEntry {
       10,
     ),
     dependencies: truncateArray(Array.from(dependencies), 15),
+    relationSummary: relationStats,
+    hierarchySummary: {
+      superClasses: truncateArray(Array.from(hierarchySummary.superClasses), 10),
+      interfaces: truncateArray(Array.from(hierarchySummary.interfaces), 10),
+    },
   };
 
   const embeddingText = [
@@ -156,6 +190,7 @@ function buildModuleEntry(repoName: string, module: ModuleGroup): IndexEntry {
     `Classes: ${module.classes.length}`,
     `Spring beans: ${springBeans.length}`,
     `Dependencies: ${Array.from(dependencies).join(", ")}`,
+    `Relations: calls=${relationStats.calls}, calledBy=${relationStats.calledBy}, references=${relationStats.references}`,
   ].join("\n");
 
   return {
@@ -184,6 +219,8 @@ function buildClassEntry(symbol: SymbolRecord): IndexEntry {
     spring: symbol.springInfo,
     filePath: symbol.relativePath,
     quality: symbol.quality,
+    hierarchy: symbol.hierarchy,
+    relations: symbol.relations,
   };
 
   return {
@@ -327,6 +364,27 @@ async function run() {
     path.dirname(fileURLToPath(import.meta.url)),
     "../../scripts/milvus_ingest.py",
   );
+
+  if (process.env.DISABLE_MILVUS === "1" || process.env.MILVUS_DRY_RUN === "1") {
+    console.log(
+      "[idea-bridge] Milvus ingestion skipped because DISABLE_MILVUS/MILVUS_DRY_RUN is set.",
+    );
+    console.log(
+      `[idea-bridge] Sample payload row: ${JSON.stringify(
+        payload.rows[0],
+        null,
+        2,
+      ).slice(0, 2000)}...`,
+    );
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    console.log(
+      `[idea-bridge] Wrote payload for inspection at ${jsonPath} (deleted after dry-run).`,
+    );
+    console.log(
+      "[idea-bridge] To ingest into Milvus, rerun npm run ingest:milvus without DISABLE_MILVUS.",
+    );
+    return;
+  }
 
   console.log("Handing off to Python ingestor...");
   await new Promise<void>((resolve, reject) => {

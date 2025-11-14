@@ -1,9 +1,9 @@
 # PSI Bridge Integration Plan (Single Source of Truth)
 
-## 1. Current State Snapshot (2025-02)
-- **IntelliJ plugin (`idea-psi-exporter/`)**: exports Java PSI for classes with methods/fields/annotations, batches 500 records, HTTP POSTs to `/api/psi/upload`. Lacks usage graphs, inheritance trees, incremental triggers, and UI for bridge URL.
-- **Bridge (`idea-bridge/`)**: Fastify server accepts PSI uploads and swaps the in-memory MiniSearch index, but still rebuilds via regex at startup. Embedding + Milvus ingestion relies on Python helper and summary strings that ignore new PSI metadata.
-- **MCP server (`mcp-server/`)**: exposes staged search (bridge → Milvus module/class) with context budgeting; still backed by mock symbols or regex data because PSI payloads don’t include references/callers.
+## 1. Current State Snapshot (2025-11)
+- **IntelliJ plugin (`idea-psi-exporter/`)**: exports Java PSI for classes with methods/fields/annotations plus preliminary hierarchy & Spring hints, wraps all symbols in a schema-versioned payload, and posts to `/api/psi/upload`. Still missing reference graphs, settings UI, and incremental triggers.
+- **Bridge (`idea-bridge/`)**: loads PSI cache on boot (`.idea-bridge/psi-cache.json`), treats uploads as authoritative, and exposes enriched `SymbolRecord` fields (hierarchy/relations). Regex indexer remains only as fallback; ingestion still needs to consume the new metadata.
+- **MCP server (`mcp-server/`)**: staged search + context budgeting wired up, but still consumes legacy ingestion output (mock or regex data) until Milvus pipeline uses PSI-rich records.
 
 ## 2. Gaps vs Desired Experience
 1. **Semantic fidelity**: need callers/callees, inheritance, Spring wiring, and module dependency rolls-ups per class/method (see `doc/idea-bridge-vs-not.md`).
@@ -23,9 +23,9 @@
 3. Optional Phase: incremental export through `PsiTreeChangeListener` & `VirtualFileListener`, writing changed symbols to a retry queue.
 
 ### B. Bridge & Schema Updates
-1. Extend `SymbolRecord` (`idea-bridge/src/types.ts`) to store references, inheritance, spring info, and context budget hints; enforce schema validation on upload.
-2. Persist latest PSI payload under `.idea-bridge/psi-cache.json` so server warm-starts from PSI instead of regex.
-3. Update `/api/psi/upload` to stream-ingest batches (backpressure, gzip) and emit audit logs.
+1. ✅ Extend `SymbolRecord` (`idea-bridge/src/types.ts`) to store references, inheritance, spring info (done; relations placeholders still need real data).
+2. ✅ Persist latest PSI payload under `.idea-bridge/psi-cache.json` so server warm-starts from PSI instead of regex.
+3. Update `/api/psi/upload` to stream-ingest batches (backpressure, gzip) and emit audit logs. *(remaining)*
 
 ### C. Embedding & Search Pipeline
 1. Refresh `symbolToEmbeddingText` and `ingest:milvus` to include new metadata, maintain repo/module/class/method levels, and calculate smarter summaries (method roles, dependency counts).
