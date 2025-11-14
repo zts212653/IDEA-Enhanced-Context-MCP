@@ -6,8 +6,9 @@
   "description": "Prototype MCP server that brokers IDEA-enhanced code context searches",
   "scripts": {
     "build": "tsc --project tsconfig.json",
+    "build:watch": "tsc --project tsconfig.json --watch",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
+    "dev": "npm run build && node dist/index.js",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest"

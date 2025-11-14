@@ -46,12 +46,15 @@ The plugin action "Export PSI to Bridge" becomes available after loading. It col
 ```bash
 cd idea-bridge
 npm run build                      # Compile TypeScript
-npm run dev                        # Run with live reload (ts-node)
-npm run start                      # Run compiled version (production)
+npm run dev                        # Build and run (uses compiled code)
+npm run build:watch                # Auto-recompile on changes
+npm run start                      # Run compiled version without rebuilding
 npm run index:symbols              # Build symbol index via regex (legacy fallback)
 npm run ingest:milvus              # Push symbols to Milvus vector DB
 npm test                           # Run tests (currently minimal)
 ```
+
+**⚠️ Important**: This is an ES module project. `dev` script uses compiled code, NOT ts-node. For rapid development, run `npm run build:watch` in one terminal and `npm start` in another.
 
 **Key endpoints:**
 - `POST /api/psi/upload` - Accepts PSI payloads from plugin, swaps in-memory index
@@ -63,13 +66,17 @@ npm test                           # Run tests (currently minimal)
 ```bash
 cd mcp-server
 npm run build                      # Compile TypeScript
-npm run dev                        # Run via ts-node (for Claude Code integration)
+npm run dev                        # Build and run (uses compiled code)
+npm run build:watch                # Auto-recompile on changes
+npm run start                      # Run compiled version without rebuilding
 npm run typecheck                  # TypeScript validation without emit
 npm test                           # Run Vitest tests
 npm run test:watch                 # Vitest in watch mode
 ```
 
-The MCP server exposes `search_java_class` tool via stdio transport. Configure in Claude Desktop/Code by adding to MCP settings.
+**⚠️ Important**: This is an ES module project. `dev` script uses compiled code, NOT ts-node.
+
+The MCP server exposes `search_java_class` tool via stdio transport. Configure in Claude Desktop/Code by adding to MCP settings (see `doc/mcp-configuration-guide.md`).
 
 ## Architecture Highlights
 

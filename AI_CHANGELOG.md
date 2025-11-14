@@ -182,6 +182,122 @@ docs: add multi-agent collaboration guidelines (by claude pass1)
 
 ---
 
+### Claude Code Pass 2: Fix Codex MCP Configuration
+
+**Session Context**: User reported that Codex's self-configured MCP server showed "Tools: (none)" despite being marked as enabled. Investigation revealed ts-node ES module resolution issues.
+
+**Files Changed**:
+- `~/.codex/config.toml` (Codex user config)
+- `doc/mcp-configuration-guide.md` (created comprehensive guide)
+
+**Root Cause Analysis**:
+1. **ts-node + ES modules incompatibility**:
+   - Codex configured MCP to run `npm run dev` (uses ts-node)
+   - Project uses `"type": "module"` in package.json (ES modules)
+   - ts-node failed to resolve `./bridgeClient.js` imports from `.ts` files
+   - Error: `Cannot find module '/path/to/bridgeClient.js'`
+
+2. **Compiled dist/ already exists**:
+   - Previous Codex pass had run `npm run build` successfully
+   - Compiled JavaScript files in `dist/` work perfectly with native Node.js
+   - No need for ts-node in production MCP usage
+
+**Fixes Applied**:
+1. Updated Codex config (`~/.codex/config.toml`):
+   - Changed: `npm run dev` → `npm start`
+   - This uses compiled `dist/index.js` instead of ts-node
+   - Changed: `IDEA_BRIDGE_BASE_URL` → `IDEA_BRIDGE_URL` (code supports both, but URL is canonical)
+
+2. Created `doc/mcp-configuration-guide.md`:
+   - Configuration examples for Claude Code, Codex, Cursor
+   - Environment variable reference
+   - Troubleshooting section with this exact issue documented
+   - Port configuration summary
+   - Verification steps
+
+**Testing**:
+```bash
+# Verified compiled version starts correctly
+$ node dist/index.js
+[idea-enhanced-context] MCP server ready (PSI staged search active).
+```
+
+**Expected Outcome**:
+After Codex restarts its MCP connection, it should now see:
+```
+• idea_enhanced_context
+  • Status: enabled
+  • Tools: search_java_class  ← Should appear now!
+```
+
+**Key Decision**:
+- **Production MCP usage should always use compiled code** (`npm start`), not dev mode
+- **Dev mode (`npm run dev`) is only for development/debugging** with console access
+- This is now documented in troubleshooting guide
+
+**Environment Variables Clarification**:
+Code supports multiple names (bridgeClient.ts:35-37):
+- `IDEA_BRIDGE_BASE_URL` ✅
+- `IDEA_BRIDGE_URL` ✅ (recommended)
+- `IDEA_BRIDGE_HTTP` ✅
+All map to the same config; chose `IDEA_BRIDGE_URL` for consistency.
+
+**Next Steps for Codex**:
+1. Restart Codex or reload MCP configuration
+2. Verify `search_java_class` tool now appears
+3. Test with query: "Search for UserService classes"
+4. Should get results from spring-petclinic data ingested in Pass 4
+
+**For Other Agents**:
+Refer to `doc/mcp-configuration-guide.md` for:
+- Claude Code JSON configuration
+- Cursor AI setup
+- Full environment variable reference
+- Troubleshooting common issues
+
+**Self-Configuration**:
+After documenting the fix, Claude Code configured itself:
+```bash
+$ claude mcp add idea-enhanced-context \
+    --env IDEA_BRIDGE_URL=http://127.0.0.1:63000 \
+    --env MILVUS_ADDRESS=127.0.0.1:19530 \
+    -- node /path/to/mcp-server/dist/index.js
+
+$ claude mcp list
+idea-enhanced-context: ... - ✓ Connected
+```
+
+Now Claude Code has the `search_java_class` tool available! 🎉
+
+**Follow-up: Bridge Server Had Same Issue**:
+User discovered `idea-bridge` also fails with `npm run dev`:
+```
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '.../config.js'
+```
+
+Same root cause - ts-node + ES modules. Fixed both projects:
+
+1. **idea-bridge/package.json**:
+   - `"dev": "npm run build && node dist/server.js"` (was ts-node)
+   - Added `"build:watch"` for development
+
+2. **mcp-server/package.json**:
+   - `"dev": "npm run build && node dist/index.js"` (was ts-node)
+   - Added `"build:watch"` for development
+
+**Pattern**: Any ES module TypeScript project should use compiled code, not ts-node in dev scripts.
+
+**For rapid development**: Use `npm run build:watch` in one terminal + `npm start` in another.
+
+**Commits** (pending user):
+```bash
+fix: update Codex MCP config to use compiled code instead of ts-node (by claude pass2)
+fix: replace ts-node with compiled code in dev scripts (by claude pass2)
+docs: add comprehensive MCP configuration guide with troubleshooting (by claude pass2)
+```
+
+---
+
 ## Template for Future Entries
 
 ```markdown

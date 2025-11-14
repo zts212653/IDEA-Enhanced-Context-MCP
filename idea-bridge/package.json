@@ -6,7 +6,8 @@
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc --project tsconfig.json",
-    "dev": "ts-node --esm --experimentalSpecifierResolution=node src/server.ts",
+    "build:watch": "tsc --project tsconfig.json --watch",
+    "dev": "npm run build && node dist/server.js",
     "start": "node dist/server.js",
     "index:symbols": "npm run build && node dist/scripts/exportSymbols.js",
     "ingest:milvus": "npm run build && node dist/scripts/ingestMilvus.js",
