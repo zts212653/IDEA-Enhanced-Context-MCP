@@ -157,6 +157,31 @@ docs: add multi-agent collaboration guidelines (by claude pass1)
 
 ---
 
+### Codex Pass 4: Milvus Search Unblock (Vector Dimension + Query Serialization)
+
+**Session Context**: After the ingestion + MCP metadata work, live searches via Milvus were still failing—first due to mismatched vector dimensions (fallback embeddings created 384-dim rows before the real embeddings arrived), and then because the Python query bridge couldn’t JSON-serialize Milvus hits.
+
+**Files Changed**:
+- `idea-bridge/src/scripts/ingestMilvus.ts`
+- `idea-bridge/scripts/milvus_query.py`
+
+**What / Why**:
+1. **Dynamic embedding dimension handling** – When a “real” embedding comes in with a larger dimension than earlier fallback vectors, we now update the stored dimension and pad all previously queued rows so the Milvus collection tracks the true embedding size. Prevents `vector dimension mismatch` errors during search.
+2. **Serializable Milvus results** – `milvus_query.py` now converts each hit into a plain dict (output fields + score) before dumping JSON, resolving the prior `TypeError: Hit is not JSON serializable`.
+3. **Fresh end-to-end ingest** – Rebuilt the spring-petclinic collection with `MILVUS_RESET=1 npm run ingest:milvus`; only 12 prompts fell back to deterministic vectors, and Milvus now holds 210 entries with correct dimensions.
+4. **Search verification** – Exercised the `searchPipeline` directly (same path the MCP tool uses) with queries like `"service"`, confirming we now get Milvus-backed results that include hierarchy/relations/quality metadata.
+
+**Testing**:
+- `idea-bridge`: `npm run build`, `MILVUS_RESET=1 npm run ingest:milvus`
+- `mcp-server`: `npm run build`, `npm run test`
+- Manual search: `node … createSearchPipeline … search({ query: "service" })` → returns Milvus results containing repo/module metadata.
+
+**Next Steps**:
+1. Claude can now run MCP queries end-to-end (tool already exposed in `.codex/config.toml`).
+2. Continue exporter enhancements (call graph detection, incremental export) so future ingests populate the new relation metadata more fully.
+
+---
+
 ## Template for Future Entries
 
 ```markdown

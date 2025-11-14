@@ -62,8 +62,11 @@ def search(payload: dict):
     hits = []
     for hit in results[0] if results else []:
         entity = hit.entity
-        entity["score"] = hit.score
-        hits.append(entity)
+        record = {}
+        for field in output_fields:
+            record[field] = entity.get(field)
+        record["score"] = float(hit.score)
+        hits.append(record)
     return hits
 
 

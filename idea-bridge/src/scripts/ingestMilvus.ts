@@ -306,6 +306,15 @@ async function run() {
   const embeddedRows: Array<ReturnType<typeof prepareRow>> = [];
   let dimension: number | undefined;
   let fallbackCount = 0;
+  function resizeExistingRows(targetDimension: number) {
+    for (const row of embeddedRows) {
+      const vector = row[config.milvusVectorField];
+      if (Array.isArray(vector)) {
+        row[config.milvusVectorField] = adjustVectorLength(vector, targetDimension);
+      }
+    }
+  }
+
   for (const entry of entries) {
     const prompt = entry.embeddingText;
     let embedding: number[];
@@ -327,7 +336,12 @@ async function run() {
     if (!dimension) {
       dimension = embedding.length;
     } else if (embedding.length !== dimension) {
-      embedding = adjustVectorLength(embedding, dimension);
+      if (embedding.length > dimension) {
+        dimension = embedding.length;
+        resizeExistingRows(dimension);
+      } else {
+        embedding = adjustVectorLength(embedding, dimension);
+      }
     }
 
     embeddedRows.push(prepareRow(entry, embedding, config.milvusVectorField));
