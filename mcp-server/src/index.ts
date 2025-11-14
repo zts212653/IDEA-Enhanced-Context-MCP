@@ -383,7 +383,7 @@ server
   .connect(transport)
   .then(() => {
     console.log(
-      "[idea-enhanced-context] MCP server ready (mock search only for now).",
+      "[idea-enhanced-context] MCP server ready (PSI staged search active).",
     );
   })
   .catch((error) => {
