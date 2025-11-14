@@ -7,6 +7,7 @@ import { createMilvusSearchClient } from "./milvusClient.js";
 import {
   createSearchPipeline,
   type MilvusSearchHandle,
+  applyContextBudget,
 } from "./searchPipeline.js";
 import type { SymbolRecord } from "./types.js";
 
@@ -98,27 +99,42 @@ const server = new McpServer(
   },
 );
 
+const hitSchema = z.object({
+  fqn: z.string(),
+  kind: z.enum(["CLASS", "INTERFACE", "METHOD", "MODULE", "REPOSITORY"]),
+  module: z.string(),
+  summary: z.string(),
+  score: z.number().min(0).max(1).optional(),
+  scoreHints: z
+    .object({
+      references: z.number().int().nonnegative().optional(),
+      lastModifiedDays: z.number().int().nonnegative().optional(),
+    })
+    .partial()
+    .optional(),
+});
+
+const stageSummarySchema = z.object({
+  name: z.enum(["bridge", "milvus-module", "milvus-class", "fallback"]),
+  hitCount: z.number().int().nonnegative(),
+  kinds: z.array(z.string()).optional(),
+});
+
 const searchResultSchema = z.object({
   query: z.string(),
-  limit: z.number().int().min(1).max(20),
+  requestedLimit: z.number().int().min(1).max(20),
   moduleFilter: z.string().nullable(),
-  total: z.number().int().min(0),
-  results: z.array(
-    z.object({
-      fqn: z.string(),
-      kind: z.enum(["CLASS", "INTERFACE", "METHOD"]),
-      module: z.string(),
-      summary: z.string(),
-      score: z.number().min(0).max(1),
-      scoreHints: z
-        .object({
-          references: z.number().int().nonnegative().optional(),
-          lastModifiedDays: z.number().int().nonnegative().optional(),
-        })
-        .partial()
-        .optional(),
-    }),
-  ),
+  fallbackUsed: z.boolean(),
+  totalCandidates: z.number().int().min(0),
+  deliveredCount: z.number().int().min(0),
+  omittedCount: z.number().int().min(0),
+  stages: z.array(stageSummarySchema),
+  moduleCandidates: z.array(hitSchema),
+  deliveredResults: z.array(hitSchema),
+  budget: z.object({
+    tokenLimit: z.number().int().positive(),
+    usedTokens: z.number().int().nonnegative(),
+  }),
 });
 
 server.registerTool(
@@ -131,13 +147,30 @@ server.registerTool(
     outputSchema: searchResultSchema,
   },
   async (args) => {
-    const results = await searchPipeline.search(args);
+    const outcome = await searchPipeline.search(args);
+    const budget = applyContextBudget(outcome.finalResults);
+    const moduleCandidates = (outcome.moduleResults ?? []).slice(0, 5);
+    const stages = outcome.stages.map((stage) => ({
+      name: stage.name,
+      hitCount: stage.hits.length,
+      kinds: Array.from(new Set(stage.hits.map((hit) => hit.kind))),
+    }));
+
     const payload = {
       query: args.query,
-      limit: args.limit ?? 5,
+      requestedLimit: args.limit ?? 5,
       moduleFilter: args.moduleFilter ?? null,
-      total: results.length,
-      results,
+      fallbackUsed: outcome.fallbackUsed,
+      totalCandidates: outcome.finalResults.length,
+      deliveredCount: budget.delivered.length,
+      omittedCount: budget.omittedCount,
+      stages,
+      moduleCandidates,
+      deliveredResults: budget.delivered,
+      budget: {
+        tokenLimit: budget.tokenLimit,
+        usedTokens: budget.usedTokens,
+      },
     };
     return {
       content: [

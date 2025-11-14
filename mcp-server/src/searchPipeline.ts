@@ -12,6 +12,31 @@ export interface MilvusSearchHandle {
   search(params: SearchArguments): Promise<SymbolRecord[] | undefined>;
 }
 
+export type SearchStageName =
+  | "bridge"
+  | "milvus-module"
+  | "milvus-class"
+  | "fallback";
+
+export type SearchStage = {
+  name: SearchStageName;
+  hits: SearchHit[];
+};
+
+export type SearchOutcome = {
+  finalResults: SearchHit[];
+  moduleResults?: SearchHit[];
+  fallbackUsed: boolean;
+  stages: SearchStage[];
+};
+
+export type ContextBudgetReport = {
+  delivered: SearchHit[];
+  usedTokens: number;
+  tokenLimit: number;
+  omittedCount: number;
+};
+
 export function rankSymbols(
   symbols: SymbolRecord[],
   args: SearchArguments,
@@ -43,6 +68,35 @@ export function rankSymbols(
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
     .map(({ symbol, score }) => ({ ...symbol, score }));
+}
+
+function estimateTokens(hit: SearchHit) {
+  const summaryLength = hit.summary?.length ?? 80;
+  return Math.max(20, Math.ceil(summaryLength / 4));
+}
+
+export function applyContextBudget(
+  results: SearchHit[],
+  tokenLimit = 6000,
+): ContextBudgetReport {
+  const delivered: SearchHit[] = [];
+  let usedTokens = 0;
+
+  for (const hit of results) {
+    const tokens = estimateTokens(hit);
+    if (usedTokens + tokens > tokenLimit) {
+      break;
+    }
+    delivered.push(hit);
+    usedTokens += tokens;
+  }
+
+  return {
+    delivered,
+    usedTokens,
+    tokenLimit,
+    omittedCount: Math.max(0, results.length - delivered.length),
+  };
 }
 
 export function createSearchPipeline({
@@ -86,30 +140,50 @@ export function createSearchPipeline({
     }
   }
 
-  async function search(args: SearchArguments): Promise<SearchHit[]> {
+  async function search(args: SearchArguments): Promise<SearchOutcome> {
+    const stages: SearchStage[] = [];
+
     const bridgeResults = await tryBridge(args);
     if (bridgeResults && bridgeResults.length > 0) {
-      return bridgeResults;
+      stages.push({ name: "bridge", hits: bridgeResults });
+      return {
+        finalResults: bridgeResults,
+        fallbackUsed: false,
+        stages,
+      };
     }
 
-    const moduleFirst = await tryMilvus({
+    const moduleResults = await tryMilvus({
       ...args,
       preferredLevels: ["module"],
       limit: 5,
     });
-    if (moduleFirst && moduleFirst.length > 0) {
-      return moduleFirst;
+    if (moduleResults && moduleResults.length > 0) {
+      stages.push({ name: "milvus-module", hits: moduleResults });
     }
 
     const classResults = await tryMilvus({
       ...args,
-      preferredLevels: ["class", "method"],
+      preferredLevels: args.preferredLevels ?? ["class", "method"],
     });
     if (classResults && classResults.length > 0) {
-      return classResults;
+      stages.push({ name: "milvus-class", hits: classResults });
+      return {
+        finalResults: classResults,
+        moduleResults,
+        fallbackUsed: false,
+        stages,
+      };
     }
 
-    return rankSymbols(fallbackSymbols, args);
+    const fallbackResults = rankSymbols(fallbackSymbols, args);
+    stages.push({ name: "fallback", hits: fallbackResults });
+    return {
+      finalResults: fallbackResults,
+      moduleResults,
+      fallbackUsed: true,
+      stages,
+    };
   }
 
   return {
