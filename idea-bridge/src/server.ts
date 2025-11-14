@@ -2,6 +2,7 @@ import Fastify from "fastify";
 
 import { loadConfig } from "./config.js";
 import { buildSymbolRecords, SymbolIndex } from "./indexer.js";
+import type { SymbolRecord } from "./types.js";
 
 async function bootstrap() {
   const config = loadConfig();
@@ -11,14 +12,43 @@ async function bootstrap() {
     { projectRoot: config.projectRoot },
     "building symbol index...",
   );
-  const records = await buildSymbolRecords({ projectRoot: config.projectRoot });
-  const index = new SymbolIndex(records);
+  let records = await buildSymbolRecords({ projectRoot: config.projectRoot });
+  let index = new SymbolIndex(records);
+
+  function replaceRecords(newRecords: SymbolRecord[]) {
+    records = newRecords;
+    index = new SymbolIndex(records);
+    fastify.log.info(
+      { count: records.length },
+      "symbol index reloaded via PSI upload",
+    );
+  }
 
   fastify.get("/healthz", async () => ({ status: "ok" }));
   fastify.get("/api/info", async () => ({
     projectRoot: config.projectRoot,
     symbolCount: records.length,
   }));
+
+  fastify.post("/api/psi/upload", async (request, reply) => {
+    const body = request.body as { symbols?: SymbolRecord[] } | undefined;
+    if (!body || !Array.isArray(body.symbols) || body.symbols.length === 0) {
+      reply.code(400);
+      return { error: "payload must contain a non-empty symbols array" };
+    }
+
+    const sanitized = body.symbols.filter((symbol) =>
+      typeof symbol?.fqn === "string" && typeof symbol?.summary === "string",
+    );
+
+    if (sanitized.length === 0) {
+      reply.code(400);
+      return { error: "no valid symbol records found" };
+    }
+
+    replaceRecords(sanitized);
+    return { updated: sanitized.length };
+  });
 
   fastify.get("/api/symbols/search", async (request, reply) => {
     const { query, limit, module } = request.query as {
@@ -57,7 +87,8 @@ async function bootstrap() {
     return record;
   });
 
-  const address = await fastify.listen({ port: config.port, host: "0.0.0.0" });
+  const host = process.env.BRIDGE_HOST ?? "127.0.0.1";
+  const address = await fastify.listen({ port: config.port, host });
   fastify.log.info(`IDEA Bridge mock server listening at ${address}`);
 }
 
