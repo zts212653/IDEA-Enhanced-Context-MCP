@@ -1,49 +1,52 @@
-# PSI Integration Plan
+# PSI Bridge Integration Plan (Single Source of Truth)
 
-## Why we need PSI data
-- Regex-based indexer misses relationship metadata (call graphs, Spring wiring, module dependencies). Docs (`doc/idea-enhanced-context-design.md`, §3) call for PSI-derived hierarchy, references, annotations, etc.
-- JetBrains MCP tools only provide single-file operations (`doc/jetbrains-mcp-research.md`), so we must ship our own bridge plugin.
+## 1. Current State Snapshot (2025-02)
+- **IntelliJ plugin (`idea-psi-exporter/`)**: exports Java PSI for classes with methods/fields/annotations, batches 500 records, HTTP POSTs to `/api/psi/upload`. Lacks usage graphs, inheritance trees, incremental triggers, and UI for bridge URL.
+- **Bridge (`idea-bridge/`)**: Fastify server accepts PSI uploads and swaps the in-memory MiniSearch index, but still rebuilds via regex at startup. Embedding + Milvus ingestion relies on Python helper and summary strings that ignore new PSI metadata.
+- **MCP server (`mcp-server/`)**: exposes staged search (bridge → Milvus module/class) with context budgeting; still backed by mock symbols or regex data because PSI payloads don’t include references/callers.
 
-## Target deliverables
-1. **PSI exporter** (IntelliJ plugin or standalone bridge)
-   - Enumerate classes/methods/fields with fully-resolved types.
-   - Capture relationships: extends/implements, references, Spring annotations, callers.
-   - Deliver events for incremental changes (optional later).
-2. **Bridge ingestion endpoint**
-   - Current Node bridge should accept pre-serialized PSI JSON and reuse embedding/index pipeline.
-   - Endpoint shape proposal:
-     ```json
-     POST /api/psi/upload
-     {
-       "repo": "spring-petclinic-microservices",
-       "modules": [...],
-       "symbols": [ { ... enriched metadata ... } ]
-     }
-     ```
-3. **Backpressure & batching**
-   - Large repos require chunked uploads (e.g., 500 symbols per batch) with idempotency tokens.
+## 2. Gaps vs Desired Experience
+1. **Semantic fidelity**: need callers/callees, inheritance, Spring wiring, and module dependency rolls-ups per class/method (see `doc/idea-bridge-vs-not.md`).
+2. **Data freshness**: exporter should re-run on file/module changes and persist schema version so bridge can cache PSI artifacts across restarts.
+3. **Embedding quality**: ingestion must consume PSI-rich metadata and produce differentiated repository/module/class/method vectors following `doc/embedding-layer.md`.
+4. **Operational flow**: single command (or IDE action) should run exporter → upload → ingest → verify search against a reference repo (e.g., `~/projects/spring-petclinic-microservices`).
 
-## Data schema (draft)
-- Base `SymbolRecord` fields already exist in `idea-bridge/src/types.ts`. PSI exporter should produce the same shape:
-  - `repoName`, `module`, `modulePath`, `packageName`, `fqn`, `kind` (CLASS/INTERFACE/METHOD).
-  - `annotations`, `fields`, `methods` (with param/return FQNs), `springInfo`, `dependencies`.
-  - `metadata` extras (e.g., `callers`, `owners`, `gitInfo`).
-- For method-level records, supply `overrides`, `calledMethods`, `isBlocking`, etc. (PSI has this via `CallHierarchyNodeDescriptor`).
+## 3. Work Plan
+### A. PSI Exporter Enhancements
+1. Add collectors for:
+   - Reference graphs (`FindUsagesHandler`, `CallHierarchyNodeDescriptor`) to populate `references`, `calledBy`, `calls`.
+   - Inheritance & overrides (`SuperMethodsSearch`, `DirectClassInheritorsSearch`).
+   - Spring wiring heuristics (annotation whitelist, bean names, injected field wiring).
+2. Provide settings panel + action dialog:
+   - Bridge URL, batch size, include/exclude modules, schema version.
+   - Progress indicator with per-batch status + error log.
+3. Optional Phase: incremental export through `PsiTreeChangeListener` & `VirtualFileListener`, writing changed symbols to a retry queue.
 
-## Integration workflow
-1. IntelliJ plugin traverses PSI (using `JavaRecursiveElementVisitor` or `FilenameIndex` + `PsiShortNamesCache`).
-2. Serialize into the above schema, chunked per module.
-3. POST to bridge’s `/api/psi/upload`.
-4. Bridge writes to disk or queue, triggers existing embedding pipeline (`symbolToEmbeddingText` already expects these fields).
-5. Milvus ingestion stays unchanged (already multi-level).
+### B. Bridge & Schema Updates
+1. Extend `SymbolRecord` (`idea-bridge/src/types.ts`) to store references, inheritance, spring info, and context budget hints; enforce schema validation on upload.
+2. Persist latest PSI payload under `.idea-bridge/psi-cache.json` so server warm-starts from PSI instead of regex.
+3. Update `/api/psi/upload` to stream-ingest batches (backpressure, gzip) and emit audit logs.
 
-## Open questions / next steps
-- Authentication between IDE and bridge API? (Local only vs remote CI jobs.)
-- Incremental updates: watch for file edits and only resend affected symbols.
-- Versioning: include `ideaVersion`, `pluginVersion`, `schemaVersion` to avoid drift.
-- Testing: create sample PSI export JSON under `tests/fixtures` to validate ingestion without IDE.
+### C. Embedding & Search Pipeline
+1. Refresh `symbolToEmbeddingText` and `ingest:milvus` to include new metadata, maintain repo/module/class/method levels, and calculate smarter summaries (method roles, dependency counts).
+2. Until Node gRPC constraints lift, harden Python Milvus helper with health checks + exponential backoff; afterwards, switch to native SDK path noted in `doc/milvus-node-connectivity.md`.
+3. Update MCP tool output to expose module hits, index levels, and context-budget diagnostics so downstream agents can stage queries (`doc/embedding-layer.md` guidance).
 
-## Action items
-1. Spec IntelliJ plugin tasks (PSI traversal + HTTP push).
-2. Implement `/api/psi/upload` in Node bridge + storage queue.
-3. Build integration test using fixture data to ensure embeddings/index update correctly once PSI feed arrives.
+### D. Validation Loop
+1. Reference repo: `~/projects/spring-petclinic-microservices`.
+2. Script (`scripts/e2e-psi.sh`):
+   - Launch Milvus + Ollama.
+   - Run IntelliJ exporter headlessly (or via CLI action).
+   - Upload to bridge, trigger `npm run ingest:milvus`.
+   - Call MCP search tool with canned queries (Spring beans, repository usages) and assert expected hits.
+3. Document reproducible steps in `doc/psi-integration-status.md`, updating as we hit milestones.
+
+## 4. Ownership & Timeline
+| Track | Owner | ETA |
+| --- | --- | --- |
+| PSI exporter enrichments + settings | IDE plugin team | Week 1-2 |
+| Bridge schema/storage + PSI-first boot | Bridge maintainer | Week 2 |
+| Embedding/search hardening | MCP team | Week 3 |
+| End-to-end validation + docs | Shared | Week 4 |
+
+This document supersedes previous plugin-specific plans; keep it updated as the canonical spec for PSI integration work.

@@ -2,17 +2,34 @@ import Fastify from "fastify";
 
 import { loadConfig } from "./config.js";
 import { buildSymbolRecords, SymbolIndex } from "./indexer.js";
+import { loadPsiCache, savePsiCache } from "./psiCache.js";
 import type { SymbolRecord } from "./types.js";
+
+const DEFAULT_SCHEMA_VERSION = 2;
 
 async function bootstrap() {
   const config = loadConfig();
   const fastify = Fastify({ logger: true });
 
-  fastify.log.info(
-    { projectRoot: config.projectRoot },
-    "building symbol index...",
-  );
-  let records = await buildSymbolRecords({ projectRoot: config.projectRoot });
+  let records: SymbolRecord[] = [];
+  const cached = await loadPsiCache(config.psiCachePath);
+  if (cached?.symbols?.length) {
+    fastify.log.info(
+      {
+        cachePath: config.psiCachePath,
+        schemaVersion: cached.schemaVersion,
+        symbolCount: cached.symbols.length,
+      },
+      "loaded PSI cache from previous export",
+    );
+    records = cached.symbols;
+  } else {
+    fastify.log.info(
+      { projectRoot: config.projectRoot },
+      "building symbol index via regex fallback",
+    );
+    records = await buildSymbolRecords({ projectRoot: config.projectRoot });
+  }
   let index = new SymbolIndex(records);
 
   function replaceRecords(newRecords: SymbolRecord[]) {
@@ -31,7 +48,12 @@ async function bootstrap() {
   }));
 
   fastify.post("/api/psi/upload", async (request, reply) => {
-    const body = request.body as { symbols?: SymbolRecord[] } | undefined;
+    const body = request.body as {
+      symbols?: SymbolRecord[];
+      schemaVersion?: number;
+      generatedAt?: string;
+      projectName?: string;
+    } | null;
     if (!body || !Array.isArray(body.symbols) || body.symbols.length === 0) {
       reply.code(400);
       return { error: "payload must contain a non-empty symbols array" };
@@ -47,7 +69,23 @@ async function bootstrap() {
     }
 
     replaceRecords(sanitized);
-    return { updated: sanitized.length };
+    const metadata = {
+      schemaVersion: Number(body.schemaVersion ?? DEFAULT_SCHEMA_VERSION),
+      generatedAt: body.generatedAt ?? new Date().toISOString(),
+      projectName: body.projectName,
+    };
+    try {
+      await savePsiCache(config.psiCachePath, {
+        ...metadata,
+        symbols: sanitized,
+      });
+    } catch (error) {
+      fastify.log.warn(
+        { err: error },
+        "failed to persist PSI cache after upload",
+      );
+    }
+    return { updated: sanitized.length, ...metadata };
   });
 
   fastify.get("/api/symbols/search", async (request, reply) => {

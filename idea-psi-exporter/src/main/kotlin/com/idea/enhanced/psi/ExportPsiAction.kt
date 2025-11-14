@@ -23,15 +23,11 @@ class ExportPsiAction : AnAction() {
                         Messages.showWarningDialog(project, "No symbols found to export.", "PSI Export")
                         return
                     }
-                    val chunks = records.chunked(BridgeUploader.MAX_BATCH_SIZE)
-                    val uploader = BridgeUploader()
-                    chunks.forEachIndexed { index, chunk ->
-                        indicator.fraction = index.toDouble() / chunks.size
-                        uploader.upload(chunk)
-                    }
+                    indicator.fraction = 0.95
+                    BridgeUploader.upload(project.name, records)
                     Messages.showInfoMessage(
                         project,
-                        "Exported ${records.size} symbols in ${chunks.size} batch(es).",
+                        "Exported ${records.size} symbols to bridge.",
                         "PSI Export",
                     )
                 } catch (ex: Exception) {

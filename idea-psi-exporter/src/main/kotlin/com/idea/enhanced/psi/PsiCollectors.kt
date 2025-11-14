@@ -3,7 +3,6 @@ package com.idea.enhanced.psi
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.intellij.ide.highlighter.JavaFileType
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.module.ModuleUtil
 import com.intellij.openapi.progress.ProgressIndicator
@@ -17,11 +16,14 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.time.Instant
+
+import com.intellij.openapi.application.ApplicationManager
 
 class PsiSymbolCollector(private val project: Project) {
     private val logger = Logger.getInstance(PsiSymbolCollector::class.java)
 
-    fun collect(indicator: ProgressIndicator): List<SymbolRecord> = com.intellij.openapi.application.ApplicationManager.getApplication().runReadAction<List<SymbolRecord>> {
+    fun collect(indicator: ProgressIndicator): List<SymbolRecord> = ApplicationManager.getApplication().runReadAction<List<SymbolRecord>> {
         val scope = GlobalSearchScope.projectScope(project)
         val javaFiles: Collection<VirtualFile> =
             FileTypeIndex.getFiles(JavaFileType.INSTANCE, scope)
@@ -50,6 +52,33 @@ object SymbolBuilder {
         val fields = psiClass.fields.map(::fieldInfo)
         val annotations = psiClass.annotations.map(::annotationInfo)
         val summary = extractDoc(psiClass).ifBlank { "PSI class $fqName" }
+        val imports = psiJavaFile?.importList?.allImportStatements
+            ?.mapNotNull { it.importReference?.qualifiedName ?: it.text }
+            ?: emptyList()
+        val extends = psiClass.extendsListTypes.mapNotNull { it.canonicalText }
+        val implements = psiClass.implementsListTypes.mapNotNull { it.canonicalText }
+        val hierarchy = deriveHierarchy(psiClass)
+        val dependencyInfo = DependencyInfo(
+            imports = imports,
+            extends = extends,
+            implements = implements,
+            fieldTypes = fields.mapNotNull { it.typeFqn ?: it.type }.distinct(),
+            methodReturnTypes = methods.mapNotNull { it.returnTypeFqn ?: it.returnType }.distinct(),
+            methodParameterTypes = methods.flatMap { method ->
+                method.parameters.mapNotNull { it.typeFqn ?: it.type }
+            }.distinct(),
+        )
+        val springInfo = deriveSpringInfo(annotations, fields)
+        val relations = RelationInfo(
+            calls = emptyList(),
+            calledBy = emptyList(),
+            references = dependencyInfo.imports,
+        )
+        val quality = QualityMetrics(
+            methodCount = methods.size,
+            fieldCount = fields.size,
+            annotationCount = annotations.size,
+        )
         return SymbolRecord(
             repoName = psiClass.project.name,
             fqn = fqName,
@@ -66,11 +95,19 @@ object SymbolBuilder {
             fields = fields,
             modifiers = psiClass.modifierList?.text?.split("\\s+".toRegex())?.filter { it.isNotBlank() }
                 ?: emptyList(),
+            imports = imports,
+            extends = extends,
+            implements = implements,
+            dependencies = dependencyInfo,
+            springInfo = springInfo,
+            hierarchy = hierarchy,
+            relations = relations,
+            quality = quality,
         )
     }
 
-    private fun extractDoc(element: JavaDocumentedElement): String {
-        val doc = element.docComment ?: return ""
+    private fun extractDoc(element: PsiElement): String {
+        val doc = (element as? PsiDocCommentOwner)?.docComment ?: return ""
         return doc.text.lines()
             .map { it.trim().trimStart('*').trim() }
             .filter { it.isNotBlank() && !it.startsWith("/**") && it != "*/" }
@@ -122,7 +159,7 @@ object SymbolBuilder {
 }
 
 object BridgeUploader {
-    const val MAX_BATCH_SIZE = 500
+    private const val SCHEMA_VERSION = 2
     private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
     private val httpClient: HttpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
@@ -134,8 +171,15 @@ object BridgeUploader {
             "http://127.0.0.1:63000/api/psi/upload",
         )
 
-    fun upload(symbols: List<SymbolRecord>) {
-        val requestBody = gson.toJson(mapOf("symbols" to symbols))
+    fun upload(projectName: String, symbols: List<SymbolRecord>) {
+        val payload = PsiUploadPayload(
+            schemaVersion = SCHEMA_VERSION,
+            generatedAt = Instant.now().toString(),
+            projectName = projectName,
+            symbolCount = symbols.size,
+            symbols = symbols,
+        )
+        val requestBody = gson.toJson(payload)
         val request = HttpRequest.newBuilder()
             .uri(URI.create(bridgeUrl))
             .timeout(Duration.ofSeconds(30))
@@ -149,6 +193,14 @@ object BridgeUploader {
         logger.info("Uploaded ${symbols.size} symbols to bridge")
     }
 }
+
+data class PsiUploadPayload(
+    val schemaVersion: Int,
+    val generatedAt: String,
+    val projectName: String,
+    val symbolCount: Int,
+    val symbols: List<SymbolRecord>,
+)
 
 data class SymbolRecord(
     val repoName: String,
@@ -165,6 +217,14 @@ data class SymbolRecord(
     val methods: List<MethodInfo>,
     val fields: List<FieldInfo>,
     val modifiers: List<String>,
+    val imports: List<String>,
+    val extends: List<String>,
+    val implements: List<String>,
+    val dependencies: DependencyInfo,
+    val springInfo: SpringInfo?,
+    val hierarchy: HierarchyInfo?,
+    val relations: RelationInfo?,
+    val quality: QualityMetrics,
 )
 
 data class AnnotationInfo(
@@ -197,3 +257,87 @@ data class FieldInfo(
     val modifiers: List<String>,
     val annotations: List<AnnotationInfo>,
 )
+
+data class DependencyInfo(
+    val imports: List<String>,
+    val extends: List<String>,
+    val implements: List<String>,
+    val fieldTypes: List<String>,
+    val methodReturnTypes: List<String>,
+    val methodParameterTypes: List<String>,
+)
+
+data class SpringInfo(
+    val isSpringBean: Boolean,
+    val beanType: String?,
+    val annotations: List<String>,
+    val autoWiredDependencies: List<String>,
+)
+
+data class HierarchyInfo(
+    val superClass: String?,
+    val interfaces: List<String>,
+    val isAbstract: Boolean,
+    val isSealed: Boolean,
+)
+
+data class RelationInfo(
+    val calls: List<String>,
+    val calledBy: List<String>,
+    val references: List<String>,
+)
+
+data class QualityMetrics(
+    val methodCount: Int,
+    val fieldCount: Int,
+    val annotationCount: Int,
+)
+
+private val springBeanAnnotations = setOf(
+    "org.springframework.stereotype.Component",
+    "org.springframework.stereotype.Service",
+    "org.springframework.stereotype.Repository",
+    "org.springframework.stereotype.Controller",
+    "org.springframework.web.bind.annotation.RestController",
+    "org.springframework.context.annotation.Configuration",
+)
+
+private val injectionAnnotations = setOf(
+    "org.springframework.beans.factory.annotation.Autowired",
+    "jakarta.inject.Inject",
+    "javax.inject.Inject",
+    "jakarta.annotation.Resource",
+    "javax.annotation.Resource",
+)
+
+private fun deriveHierarchy(psiClass: PsiClass): HierarchyInfo =
+    HierarchyInfo(
+        superClass = psiClass.superClass?.qualifiedName,
+        interfaces = psiClass.interfaces.mapNotNull { it.qualifiedName ?: it.name },
+        isAbstract = psiClass.hasModifierProperty(PsiModifier.ABSTRACT),
+        isSealed = psiClass.hasModifierProperty(PsiModifier.SEALED),
+    )
+
+private fun deriveSpringInfo(
+    annotations: List<AnnotationInfo>,
+    fields: List<FieldInfo>,
+): SpringInfo? {
+    val beanAnnotations = annotations
+        .mapNotNull { it.fqn ?: it.name }
+        .filter { springBeanAnnotations.contains(it) }
+    if (beanAnnotations.isEmpty()) {
+        return null
+    }
+    val autoWired = fields.filter { field ->
+        field.annotations.any { ann ->
+            val fqn = ann.fqn ?: ann.name
+            injectionAnnotations.contains(fqn)
+        }
+    }.map { it.name }
+    return SpringInfo(
+        isSpringBean = true,
+        beanType = beanAnnotations.firstOrNull()?.substringAfterLast('.'),
+        annotations = beanAnnotations,
+        autoWiredDependencies = autoWired,
+    )
+}

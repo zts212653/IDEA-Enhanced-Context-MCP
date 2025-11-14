@@ -55,6 +55,19 @@ export interface SpringInfo {
   autoWiredDependencies: string[];
 }
 
+export interface HierarchyInfo {
+  superClass?: string;
+  interfaces: string[];
+  isAbstract: boolean;
+  isSealed: boolean;
+}
+
+export interface RelationInfo {
+  calls: string[];
+  calledBy: string[];
+  references: string[];
+}
+
 export interface QualityMetrics {
   hasJavadoc: boolean;
   methodCount: number;
@@ -83,6 +96,8 @@ export interface SymbolRecord {
   typeInfo: TypeInfo;
   dependencies: DependencyInfo;
   springInfo?: SpringInfo;
+  hierarchy?: HierarchyInfo;
+  relations?: RelationInfo;
   quality: QualityMetrics;
   lineStart: number;
   lineEnd: number;
