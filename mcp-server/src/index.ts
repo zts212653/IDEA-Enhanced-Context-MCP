@@ -15,7 +15,10 @@ import type {
   RelationInfo,
   HierarchyInfo,
   SpringInfo,
+  UploadInfo,
 } from "./types.js";
+
+const log = (...args: unknown[]) => console.error("[idea-mcp]", ...args);
 
 const mockSymbols: SymbolRecord[] = [
   {
@@ -102,6 +105,37 @@ const server = new McpServer(
     capabilities: { tools: {} },
     instructions:
       "Performs staged semantic search backed by IntelliJ PSI uploads (bridge) and Milvus embeddings. Query modules/classes/methods and review module hits separately before final context delivery.",
+  },
+);
+
+server.registerTool(
+  "health_check",
+  {
+    title: "Health check",
+    description:
+      "Report bridge and Milvus environment values to verify MCP wiring.",
+    inputSchema: z.object({}).describe("No input required."),
+  },
+  async () => {
+    const bridgeUrl =
+      process.env.IDEA_BRIDGE_URL ??
+      process.env.IDEA_BRIDGE_BASE_URL ??
+      process.env.IDEA_BRIDGE_HTTP ??
+      null;
+    const milvusAddress = process.env.MILVUS_ADDRESS ?? null;
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Bridge URL: ${bridgeUrl ?? "unknown"}\nMilvus Address: ${milvusAddress ?? "unknown"}`,
+        },
+      ],
+      structuredContent: {
+        ok: Boolean(bridgeUrl && milvusAddress),
+        bridgeUrl,
+        milvusAddress,
+      },
+    };
   },
 );
 
@@ -252,6 +286,10 @@ function describeHit(hit: SearchHit) {
     hit.springInfo ??
     ((metadata.spring as SpringInfo | undefined) ??
       (metadata.springInfo as SpringInfo | undefined));
+  const uploadInfo =
+    hit.uploadInfo ??
+    ((metadata.upload as UploadInfo | undefined) ??
+      (metadata.uploadMeta as UploadInfo | undefined));
 
   return {
     fqn: hit.fqn,
@@ -266,6 +304,7 @@ function describeHit(hit: SearchHit) {
     relations,
     hierarchy,
     springInfo,
+    uploadInfo,
     metadata,
     location: {
       repoName,
@@ -379,14 +418,13 @@ server.registerTool(
 
 const transport = new StdioServerTransport();
 
-server
-  .connect(transport)
-  .then(() => {
-    console.log(
-      "[idea-enhanced-context] MCP server ready (PSI staged search active).",
-    );
-  })
-  .catch((error) => {
-    console.error("Failed to start MCP server:", error);
+(async () => {
+  try {
+    log("starting MCP server...");
+    await server.connect(transport);
+    log("MCP server ready (PSI staged search active).");
+  } catch (error) {
+    log("failed to start MCP server:", error);
     process.exitCode = 1;
-  });
+  }
+})();

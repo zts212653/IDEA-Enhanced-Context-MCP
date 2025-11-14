@@ -13,6 +13,16 @@ class ExportPsiAction : AnAction() {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
+        val settingsState = BridgeSettingsState.getInstance(project)
+        val dialog = BridgeSettingsDialog(project, settingsState)
+        if (!dialog.showAndGet()) {
+            return
+        }
+        settingsState.bridgeUrl = dialog.bridgeUrl
+        settingsState.schemaVersion = dialog.schemaVersion
+        settingsState.batchSize = dialog.batchSize
+        val batchSize = settingsState.batchSize.coerceAtLeast(50)
+
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Export PSI metadata", false) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = false
@@ -23,11 +33,16 @@ class ExportPsiAction : AnAction() {
                         Messages.showWarningDialog(project, "No symbols found to export.", "PSI Export")
                         return
                     }
-                    indicator.fraction = 0.95
-                    BridgeUploader.upload(project.name, records)
+                    val uploader = BridgeUploader(settingsState.bridgeUrl, settingsState.schemaVersion)
+                    val chunks = records.chunked(batchSize)
+                    chunks.forEachIndexed { index, chunk ->
+                        if (indicator.isCanceled) return
+                        indicator.fraction = index.toDouble() / chunks.size
+                        uploader.upload(project.name, chunk, index + 1, chunks.size)
+                    }
                     Messages.showInfoMessage(
                         project,
-                        "Exported ${records.size} symbols to bridge.",
+                        "Exported ${records.size} symbols in ${chunks.size} batch(es).",
                         "PSI Export",
                     )
                 } catch (ex: Exception) {

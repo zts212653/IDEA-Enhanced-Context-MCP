@@ -17,6 +17,14 @@ export type SpringInfo = {
   annotations?: string[];
 };
 
+export type UploadInfo = {
+  schemaVersion?: number;
+  projectName?: string;
+  generatedAt?: string;
+  uploadedAt?: string;
+  batchCount?: number;
+};
+
 export type SymbolRecord = {
   fqn: string;
   kind: "CLASS" | "INTERFACE" | "METHOD" | "MODULE" | "REPOSITORY";
@@ -30,6 +38,7 @@ export type SymbolRecord = {
   relations?: RelationInfo;
   hierarchy?: HierarchyInfo;
   springInfo?: SpringInfo;
+  uploadInfo?: UploadInfo;
   scoreHints?: {
     references?: number;
     lastModifiedDays?: number;

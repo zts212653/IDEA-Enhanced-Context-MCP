@@ -182,6 +182,44 @@ docs: add multi-agent collaboration guidelines (by claude pass1)
 
 ---
 
+### Codex Pass 5: PSI Exporter Settings + Upload Streaming + E2E Script
+
+**Session Context**: Implement plan steps 3 & 4—make the IntelliJ exporter configurable, enrich PSI with relation metadata, add batched upload handling/auditing on the bridge, and ship an end-to-end verification script.
+
+**Files Changed**:
+- `idea-psi-exporter/src/main/kotlin/com/idea/enhanced/psi/{ExportPsiAction.kt,PsiCollectors.kt,BridgeSettingsState.kt,BridgeSettingsDialog.kt}`
+- `idea-bridge/src/{server.ts,types.ts,scripts/ingestMilvus.ts,uploadSession.ts}`
+- `mcp-server/src/{milvusClient.ts,index.ts,types.ts}`
+- `scripts/e2e-psi.sh`
+
+**What / Why**:
+1. **Exporter UX + metadata**  
+   - Added a dialog + persistent state so users can set bridge URL, schema version, and batch size before running “Export PSI”.  
+   - The exporter now chunks uploads, tagging each batch with `batchId/totalBatches`, and collects method call targets, caller classes (via `ReferencesSearch`), referenced types, and Spring bean names for richer `relations`/`springInfo`.
+
+2. **Bridge streaming + audit log**  
+   - `/api/psi/upload` supports multi-batch sessions (server buffers batches until the final chunk arrives) and annotates every `SymbolRecord` with `uploadMeta` (schema version, project name, timestamps).  
+   - Uploads are logged to `.idea-bridge/upload-log.ndjson`, and cached PSI now retains the provenance metadata.
+
+3. **Milvus/MCP provenance exposure**  
+   - Ingestion rows embed the `uploadMeta`, and the MCP server surfaces it alongside hierarchy/relations so downstream tools know when/how data was uploaded (plus a new `health_check` tool).
+
+4. **Automation script**  
+   - Added `scripts/e2e-psi.sh` to rebuild the plugin, ingest the reference repo, and run a sample MCP query—covering the “export → ingest → search” loop.
+
+**Testing**:
+- `idea-psi-exporter`: `GRADLE_USER_HOME=.gradle-local ./gradlew clean build`
+- `idea-bridge`: `npm run build`, `npm run ingest:milvus`
+- `mcp-server`: `npm run build`
+- Manual MCP query via `searchPipeline` (saved JSON under `/tmp/mcp-search-service.md`)
+
+**Next Steps**:
+1. Extend `/api/psi/upload` to support true streaming parsers (if we need to handle >50k symbols without buffering).  
+2. Hook the IntelliJ exporter into Spring/Call hierarchy APIs for more precise relations (current version captures top-level callers/callees).  
+3. Integrate `scripts/e2e-psi.sh` into CI to guard regressions once Milvus/Ollama can run in automation.
+
+---
+
 ### Claude Code Pass 2: Fix Codex MCP Configuration
 
 **Session Context**: User reported that Codex's self-configured MCP server showed "Tools: (none)" despite being marked as enabled. Investigation revealed ts-node ES module resolution issues.

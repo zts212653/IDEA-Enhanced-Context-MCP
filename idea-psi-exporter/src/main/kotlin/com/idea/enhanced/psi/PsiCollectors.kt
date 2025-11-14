@@ -3,6 +3,7 @@ package com.idea.enhanced.psi
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.intellij.ide.highlighter.JavaFileType
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.module.ModuleUtil
 import com.intellij.openapi.progress.ProgressIndicator
@@ -11,6 +12,12 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.*
 import com.intellij.psi.search.FileTypeIndex
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.search.searches.ReferencesSearch
+import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.psi.JavaRecursiveElementVisitor
+import com.intellij.psi.PsiLiteralExpression
+import com.intellij.psi.PsiMethodCallExpression
+import com.intellij.util.Processor
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -18,7 +25,7 @@ import java.net.http.HttpResponse
 import java.time.Duration
 import java.time.Instant
 
-import com.intellij.openapi.application.ApplicationManager
+private const val MAX_RELATION_ITEMS = 20
 
 class PsiSymbolCollector(private val project: Project) {
     private val logger = Logger.getInstance(PsiSymbolCollector::class.java)
@@ -35,7 +42,7 @@ class PsiSymbolCollector(private val project: Project) {
             indicator.fraction = index.toDouble() / total
             val psiFile = psiManager.findFile(file) as? PsiJavaFile ?: return@forEachIndexed
             psiFile.classes.forEach { psiClass ->
-                SymbolBuilder.buildSymbol(psiClass)?.let(results::add)
+                SymbolBuilder.buildSymbol(project, psiClass)?.let(results::add)
             }
         }
         logger.info("Collected ${results.size} PSI symbols")
@@ -44,7 +51,7 @@ class PsiSymbolCollector(private val project: Project) {
 }
 
 object SymbolBuilder {
-    fun buildSymbol(psiClass: PsiClass): SymbolRecord? {
+    fun buildSymbol(project: Project, psiClass: PsiClass): SymbolRecord? {
         val fqName = psiClass.qualifiedName ?: return null
         val module = ModuleUtil.findModuleForPsiElement(psiClass)
         val psiJavaFile = psiClass.containingFile as? PsiJavaFile
@@ -68,11 +75,14 @@ object SymbolBuilder {
                 method.parameters.mapNotNull { it.typeFqn ?: it.type }
             }.distinct(),
         )
-        val springInfo = deriveSpringInfo(annotations, fields)
+        val springInfo = deriveSpringInfo(psiClass.annotations, annotations, fields)
+        val callTargets = collectCallTargets(psiClass)
+        val calledBy = collectClassCallers(project, psiClass)
+        val referenceTypes = buildReferenceList(dependencyInfo, callTargets)
         val relations = RelationInfo(
-            calls = emptyList(),
-            calledBy = emptyList(),
-            references = dependencyInfo.imports,
+            calls = callTargets,
+            calledBy = calledBy,
+            references = referenceTypes,
         )
         val quality = QualityMetrics(
             methodCount = methods.size,
@@ -158,25 +168,26 @@ object SymbolBuilder {
         )
 }
 
-object BridgeUploader {
-    private const val SCHEMA_VERSION = 2
-    private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
-    private val httpClient: HttpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build()
-    private val logger = Logger.getInstance(BridgeUploader::class.java)
-    private val bridgeUrl: String =
-        System.getenv("IDEA_BRIDGE_URL") ?: System.getProperty(
-            "idea.bridge.url",
-            "http://127.0.0.1:63000/api/psi/upload",
-        )
+class BridgeUploader(
+    private val bridgeUrl: String,
+    private val schemaVersion: Int,
+) {
+    companion object {
+        private val gson: Gson = GsonBuilder().disableHtmlEscaping().create()
+        private val httpClient: HttpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build()
+        private val logger = Logger.getInstance(BridgeUploader::class.java)
+    }
 
-    fun upload(projectName: String, symbols: List<SymbolRecord>) {
+    fun upload(projectName: String, symbols: List<SymbolRecord>, batchId: Int, totalBatches: Int) {
         val payload = PsiUploadPayload(
-            schemaVersion = SCHEMA_VERSION,
+            schemaVersion = schemaVersion,
             generatedAt = Instant.now().toString(),
             projectName = projectName,
             symbolCount = symbols.size,
+            batchId = batchId,
+            totalBatches = totalBatches,
             symbols = symbols,
         )
         val requestBody = gson.toJson(payload)
@@ -199,6 +210,8 @@ data class PsiUploadPayload(
     val generatedAt: String,
     val projectName: String,
     val symbolCount: Int,
+    val batchId: Int,
+    val totalBatches: Int,
     val symbols: List<SymbolRecord>,
 )
 
@@ -270,6 +283,7 @@ data class DependencyInfo(
 data class SpringInfo(
     val isSpringBean: Boolean,
     val beanType: String?,
+    val beanName: String?,
     val annotations: List<String>,
     val autoWiredDependencies: List<String>,
 )
@@ -310,6 +324,54 @@ private val injectionAnnotations = setOf(
     "javax.annotation.Resource",
 )
 
+private fun collectCallTargets(psiClass: PsiClass): List<String> {
+    val targets = LinkedHashSet<String>()
+    psiClass.accept(object : JavaRecursiveElementVisitor() {
+        override fun visitMethodCallExpression(expression: PsiMethodCallExpression) {
+            if (targets.size >= MAX_RELATION_ITEMS) {
+                return
+            }
+            val resolved = expression.resolveMethod()
+            val classFqn = resolved?.containingClass?.qualifiedName
+            if (classFqn != null && resolved != null) {
+                targets.add("$classFqn#${resolved.name}")
+            }
+            super.visitMethodCallExpression(expression)
+        }
+    })
+    return targets.toList()
+}
+
+private fun collectClassCallers(project: Project, psiClass: PsiClass): List<String> {
+    val callers = LinkedHashSet<String>()
+    val scope = GlobalSearchScope.projectScope(project)
+    ReferencesSearch.search(psiClass, scope).forEach(Processor { reference ->
+        val enclosingClass = PsiTreeUtil.getParentOfType(reference.element, PsiClass::class.java)
+        val classFqn = enclosingClass?.qualifiedName ?: enclosingClass?.name
+        if (!classFqn.isNullOrBlank()) {
+            callers.add(classFqn)
+        }
+        callers.size < MAX_RELATION_ITEMS
+    })
+    return callers.toList()
+}
+
+private fun buildReferenceList(
+    dependencyInfo: DependencyInfo,
+    callTargets: List<String>,
+): List<String> {
+    val references = LinkedHashSet<String>()
+    references.addAll(dependencyInfo.imports)
+    references.addAll(dependencyInfo.fieldTypes)
+    references.addAll(dependencyInfo.methodReturnTypes)
+    references.addAll(dependencyInfo.methodParameterTypes)
+    callTargets.asSequence()
+        .map { it.substringBefore("#") }
+        .filter { it.isNotBlank() }
+        .forEach(references::add)
+    return references.take(MAX_RELATION_ITEMS)
+}
+
 private fun deriveHierarchy(psiClass: PsiClass): HierarchyInfo =
     HierarchyInfo(
         superClass = psiClass.superClass?.qualifiedName,
@@ -319,6 +381,7 @@ private fun deriveHierarchy(psiClass: PsiClass): HierarchyInfo =
     )
 
 private fun deriveSpringInfo(
+    psiAnnotations: Array<PsiAnnotation>,
     annotations: List<AnnotationInfo>,
     fields: List<FieldInfo>,
 ): SpringInfo? {
@@ -328,6 +391,9 @@ private fun deriveSpringInfo(
     if (beanAnnotations.isEmpty()) {
         return null
     }
+    val beanName = psiAnnotations.asSequence()
+        .mapNotNull { extractBeanName(it) }
+        .firstOrNull()
     val autoWired = fields.filter { field ->
         field.annotations.any { ann ->
             val fqn = ann.fqn ?: ann.name
@@ -337,7 +403,16 @@ private fun deriveSpringInfo(
     return SpringInfo(
         isSpringBean = true,
         beanType = beanAnnotations.firstOrNull()?.substringAfterLast('.'),
+        beanName = beanName,
         annotations = beanAnnotations,
         autoWiredDependencies = autoWired,
     )
+}
+
+private fun extractBeanName(annotation: PsiAnnotation): String? {
+    val candidate = annotation.findAttributeValue("value")
+        ?: annotation.findAttributeValue("name")
+        ?: return null
+    val literal = candidate as? PsiLiteralExpression ?: return null
+    return literal.value as? String
 }

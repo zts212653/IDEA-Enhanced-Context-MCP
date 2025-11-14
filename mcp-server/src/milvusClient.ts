@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { SearchArguments, MilvusSearchHandle } from "./searchPipeline.js";
-import type { SymbolRecord } from "./types.js";
+import type { SymbolRecord, UploadInfo } from "./types.js";
 
 const DEFAULT_ADDRESS = "127.0.0.1:19530";
 const DEFAULT_COLLECTION = "idea_symbols";
@@ -170,6 +170,19 @@ function normalizeSpring(meta: Record<string, any> | undefined) {
   };
 }
 
+function normalizeUpload(meta: Record<string, any> | undefined): UploadInfo | undefined {
+  if (!meta) return undefined;
+  const upload = meta.upload ?? meta.uploadMeta;
+  if (!upload || typeof upload !== "object") return undefined;
+  return {
+    schemaVersion: upload.schemaVersion ?? upload.version,
+    projectName: upload.projectName,
+    generatedAt: upload.generatedAt,
+    uploadedAt: upload.uploadedAt ?? upload.timestamp,
+    batchCount: upload.batchCount,
+  };
+}
+
 function formatRecords(raw: any[]): SymbolRecord[] {
   return raw.map((row) => {
     const parsed = parseMetadata(row.metadata);
@@ -182,6 +195,8 @@ function formatRecords(raw: any[]): SymbolRecord[] {
     const repoName = row.repo_name ?? metadata.repoName ?? metadata.repo_name;
     const modulePath = row.module_path ?? metadata.modulePath;
     const packageName = row.package_name ?? metadata.package ?? metadata.packageName;
+
+    const uploadInfo = normalizeUpload(parsed);
 
     return {
       fqn: row.fqn ?? row.symbol_name ?? row.repo_name ?? "unknown",
@@ -196,6 +211,7 @@ function formatRecords(raw: any[]): SymbolRecord[] {
       relations: normalizeRelations(metadata),
       hierarchy: normalizeHierarchy(metadata),
       springInfo: normalizeSpring(metadata),
+      uploadInfo,
       scoreHints: {
         references: parsed?.references ?? parsed?.referenceCount,
         lastModifiedDays: parsed?.lastModifiedDays,

@@ -55,6 +55,14 @@ export interface SpringInfo {
   autoWiredDependencies: string[];
 }
 
+export interface UploadMetadata {
+  schemaVersion: number;
+  projectName?: string;
+  generatedAt?: string;
+  batchCount?: number;
+  uploadedAt: string;
+}
+
 export interface HierarchyInfo {
   superClass?: string;
   interfaces: string[];
@@ -97,6 +105,7 @@ export interface SymbolRecord {
   typeInfo: TypeInfo;
   dependencies: DependencyInfo;
   springInfo?: SpringInfo;
+  uploadMeta?: UploadMetadata;
   hierarchy?: HierarchyInfo;
   relations?: RelationInfo;
   quality: QualityMetrics;

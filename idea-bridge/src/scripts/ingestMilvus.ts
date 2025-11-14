@@ -219,6 +219,7 @@ function buildClassEntry(symbol: SymbolRecord): IndexEntry {
     spring: symbol.springInfo,
     filePath: symbol.relativePath,
     quality: symbol.quality,
+    upload: symbol.uploadMeta,
     hierarchy: symbol.hierarchy,
     relations: symbol.relations,
   };
