@@ -1,3 +1,5 @@
+import net from "node:net";
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -19,6 +21,114 @@ import type {
 } from "./types.js";
 
 const log = (...args: unknown[]) => console.error("[idea-mcp]", ...args);
+
+type BridgeHealth = {
+  url: string | null;
+  reachable: boolean;
+  status: string | null;
+  symbolCount: number | null;
+  dataSource: string | null;
+  psiCachePath: string | null;
+};
+
+type MilvusHealth = {
+  address: string | null;
+  reachable: boolean;
+  message: string | null;
+};
+
+async function fetchWithTimeout(url: string, timeoutMs = 2000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function checkBridgeHealth(baseUrl: string | null | undefined): Promise<BridgeHealth> {
+  if (!baseUrl) {
+    return {
+      url: null,
+      reachable: false,
+      status: "IDEA_BRIDGE_URL not set",
+      symbolCount: null,
+      dataSource: null,
+      psiCachePath: null,
+    };
+  }
+
+  try {
+    const healthResp = await fetchWithTimeout(new URL("/healthz", baseUrl).toString());
+    if (!healthResp.ok) {
+      return {
+        url: baseUrl,
+        reachable: false,
+        status: `HTTP ${healthResp.status}`,
+        symbolCount: null,
+        dataSource: null,
+        psiCachePath: null,
+      };
+    }
+
+    let info: Record<string, unknown> | undefined;
+    try {
+      const infoResp = await fetchWithTimeout(new URL("/api/info", baseUrl).toString());
+      if (infoResp.ok) {
+        info = (await infoResp.json()) as Record<string, unknown>;
+      }
+    } catch (error) {
+      log("bridge info fetch failed", error);
+    }
+
+    return {
+      url: baseUrl,
+      reachable: true,
+      status: "ok",
+      symbolCount: typeof info?.symbolCount === "number" ? (info!.symbolCount as number) : null,
+      dataSource: (info?.dataSource as string) ?? null,
+      psiCachePath: (info?.psiCachePath as string) ?? null,
+    };
+  } catch (error) {
+    return {
+      url: baseUrl,
+      reachable: false,
+      status: error instanceof Error ? error.message : String(error),
+      symbolCount: null,
+      dataSource: null,
+      psiCachePath: null,
+    };
+  }
+}
+
+async function checkMilvusHealth(address: string | null | undefined): Promise<MilvusHealth> {
+  if (!address) {
+    return {
+      address: null,
+      reachable: false,
+      message: "MILVUS_ADDRESS not set",
+    };
+  }
+
+  const [host, portPart] = address.split(":");
+  const port = Number(portPart ?? "19530");
+  return await new Promise<MilvusHealth>((resolve) => {
+    const socket = net.connect({ host, port }, () => {
+      socket.end();
+      resolve({ address, reachable: true, message: null });
+    });
+    socket.setTimeout(2000, () => {
+      socket.destroy(new Error("timeout"));
+    });
+    socket.on("error", (err) => {
+      resolve({ address, reachable: false, message: err.message });
+    });
+    socket.on("close", () => {
+      /* no-op */
+    });
+  });
+}
 
 const mockSymbols: SymbolRecord[] = [
   {
@@ -96,6 +206,21 @@ const searchPipeline = createSearchPipeline({
   fallbackSymbols: mockSymbols,
 });
 
+const bridgeHealthSchema = z.object({
+  url: z.string().nullable(),
+  reachable: z.boolean(),
+  status: z.string().nullable(),
+  symbolCount: z.number().nullable(),
+  dataSource: z.string().nullable(),
+  psiCachePath: z.string().nullable(),
+});
+
+const milvusHealthSchema = z.object({
+  address: z.string().nullable(),
+  reachable: z.boolean(),
+  message: z.string().nullable(),
+});
+
 const server = new McpServer(
   {
     name: "idea-enhanced-context",
@@ -115,6 +240,11 @@ server.registerTool(
     description:
       "Report bridge and Milvus environment values to verify MCP wiring.",
     inputSchema: z.object({}).describe("No input required."),
+    outputSchema: z.object({
+      ok: z.boolean(),
+      bridge: bridgeHealthSchema,
+      milvus: milvusHealthSchema,
+    }),
   },
   async () => {
     const bridgeUrl =
@@ -123,17 +253,20 @@ server.registerTool(
       process.env.IDEA_BRIDGE_HTTP ??
       null;
     const milvusAddress = process.env.MILVUS_ADDRESS ?? null;
+    const bridge = await checkBridgeHealth(bridgeUrl);
+    const milvus = await checkMilvusHealth(milvusAddress);
+    const ok = bridge.reachable && milvus.reachable;
     return {
       content: [
         {
           type: "text",
-          text: `Bridge URL: ${bridgeUrl ?? "unknown"}\nMilvus Address: ${milvusAddress ?? "unknown"}`,
+          text: `Bridge: ${bridge.status ?? "unknown"} (url: ${bridge.url ?? "n/a"})\nMilvus: ${milvus.message ?? "ok"} (address: ${milvus.address ?? "n/a"})`,
         },
       ],
       structuredContent: {
-        ok: Boolean(bridgeUrl && milvusAddress),
-        bridgeUrl,
-        milvusAddress,
+        ok,
+        bridge,
+        milvus,
       },
     };
   },

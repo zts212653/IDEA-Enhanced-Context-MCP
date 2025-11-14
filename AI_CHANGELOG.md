@@ -220,6 +220,31 @@ docs: add multi-agent collaboration guidelines (by claude pass1)
 
 ---
 
+### Codex Pass 6: Milestone A.1 – MCP Health Check & Bridge Source Reporting
+
+**Session Context**: Started Milestone A by strengthening observability—bridge now reports its PSI data source, and the MCP `health_check` tool surfaces bridge/Milvus reachability along with a revamped status script.
+
+**Files Changed**:
+- `doc/idea-enhanced-context-design.md`
+- `idea-bridge/src/server.ts`
+- `mcp-server/src/index.ts`
+- `scripts/check-mcp-status.sh`
+- `BACKLOG.md` (brought under version control)
+
+**What / Why**:
+1. **Bridge source awareness** – `/api/info` now returns `dataSource` (`psi-cache` vs `regex`) and the current cache path; whenever PSI uploads replace the index, the source flips to `psi-cache` so downstream consumers know they’re using IDEA-derived data.
+2. **Richer `health_check` tool** – MCP health responses hit `/healthz` + `/api/info` and probe the Milvus socket (via TCP) so callers can see symbol counts, PSI source, and gRPC reachability in one result; output schema now exposes structured `bridge`/`milvus` objects.
+3. **Ops script** – `scripts/check-mcp-status.sh` was upgraded to curl bridge health/info and run a quick Python TCP probe against Milvus for CLI diagnostics.
+
+**Testing**:
+- `cd mcp-server && npm run build`
+- `scripts/check-mcp-status.sh` (requires bridge + Milvus running) to verify curl + TCP probes
+
+**Next Steps**:
+- Proceed with Milestone A.2 (Milvus schema hardening) and A.3 (PSI cache module, source tagging in `search_java_class`).
+
+---
+
 ### Claude Code Pass 2: Fix Codex MCP Configuration
 
 **Session Context**: User reported that Codex's self-configured MCP server showed "Tools: (none)" despite being marked as enabled. Investigation revealed ts-node ES module resolution issues.

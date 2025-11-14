@@ -4,7 +4,11 @@ import path from "node:path";
 import { loadConfig } from "./config.js";
 import { buildSymbolRecords, SymbolIndex } from "./indexer.js";
 import { loadPsiCache, savePsiCache } from "./psiCache.js";
-import { appendUploadLog, ingestUploadBatch, resetUploadSession } from "./uploadSession.js";
+import {
+  appendUploadLog,
+  ingestUploadBatch,
+  resetUploadSession,
+} from "./uploadSession.js";
 import type { SymbolRecord } from "./types.js";
 
 const DEFAULT_SCHEMA_VERSION = 2;
@@ -14,7 +18,10 @@ async function bootstrap() {
   const fastify = Fastify({ logger: true });
 
   let records: SymbolRecord[] = [];
+  let dataSource: "psi-cache" | "regex" = "regex";
   const cached = await loadPsiCache(config.psiCachePath);
+  let dataSource: "psi-cache" | "regex" = "regex";
+
   if (cached?.symbols?.length) {
     fastify.log.info(
       {
@@ -25,12 +32,14 @@ async function bootstrap() {
       "loaded PSI cache from previous export",
     );
     records = cached.symbols;
+    dataSource = "psi-cache";
   } else {
     fastify.log.info(
       { projectRoot: config.projectRoot },
       "building symbol index via regex fallback",
     );
     records = await buildSymbolRecords({ projectRoot: config.projectRoot });
+    dataSource = "regex";
   }
   let index = new SymbolIndex(records);
   const uploadLogPath = path.join(
@@ -41,6 +50,7 @@ async function bootstrap() {
   function replaceRecords(newRecords: SymbolRecord[]) {
     records = newRecords;
     index = new SymbolIndex(records);
+    dataSource = "psi-cache";
     fastify.log.info(
       { count: records.length },
       "symbol index reloaded via PSI upload",
@@ -51,6 +61,8 @@ async function bootstrap() {
   fastify.get("/api/info", async () => ({
     projectRoot: config.projectRoot,
     symbolCount: records.length,
+    dataSource,
+    psiCachePath: config.psiCachePath,
   }));
 
   fastify.post("/api/psi/upload", async (request, reply) => {
