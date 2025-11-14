@@ -1,0 +1,18 @@
+# macOS / IDE
+.DS_Store
+.idea/
+
+# Node / TypeScript
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Python / virtual envs
+__pycache__/
+.venv/
+venv/
+
+# Runtime artifacts
+*.log
+tmp/
+.idea-enhanced-context/milvus/volumes/*
