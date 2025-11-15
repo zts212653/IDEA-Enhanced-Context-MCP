@@ -55,11 +55,33 @@ export interface SpringInfo {
   autoWiredDependencies: string[];
 }
 
+export interface UploadMetadata {
+  schemaVersion: number;
+  projectName?: string;
+  generatedAt?: string;
+  batchCount?: number;
+  uploadedAt: string;
+}
+
+export interface HierarchyInfo {
+  superClass?: string;
+  interfaces: string[];
+  isAbstract: boolean;
+  isSealed: boolean;
+}
+
+export interface RelationInfo {
+  calls: string[];
+  calledBy: string[];
+  references: string[];
+}
+
 export interface QualityMetrics {
   hasJavadoc: boolean;
   methodCount: number;
   fieldCount: number;
-  summaryLength: number;
+  summaryLength?: number;
+  annotationCount?: number;
 }
 
 export interface SymbolRecord {
@@ -83,6 +105,10 @@ export interface SymbolRecord {
   typeInfo: TypeInfo;
   dependencies: DependencyInfo;
   springInfo?: SpringInfo;
+  uploadMeta?: UploadMetadata;
+  source?: "psi-cache" | "regex";
+  hierarchy?: HierarchyInfo;
+  relations?: RelationInfo;
   quality: QualityMetrics;
   lineStart: number;
   lineEnd: number;

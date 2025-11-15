@@ -16,3 +16,10 @@ venv/
 *.log
 tmp/
 .idea-enhanced-context/milvus/volumes/*
+
+# Gradle / IntelliJ plugin artifacts
+.gradle/
+**/.gradle/
+**/.gradle-local/
+**/build/
+idea-psi-exporter/.intellijPlatform/

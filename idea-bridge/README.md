@@ -11,6 +11,7 @@ This package scans a local IntelliJ project (default: `~/projects/spring-petclin
 | `npm start` | Run the compiled server from `dist/server.js`. |
 | `npm run ingest:milvus` | Build symbol records, generate embeddings, and call the Python ingestor to recreate+populate the Milvus collection. |
 | `npm run index:symbols` | Emit the raw symbol list as JSON (mainly for debugging). |
+| `POST /api/psi/upload` | Replace the in-memory symbol index with a PSI-export payload (see PSI plan). |
 
 ## HTTP API
 

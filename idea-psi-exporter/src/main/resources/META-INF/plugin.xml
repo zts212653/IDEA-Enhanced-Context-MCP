@@ -1,0 +1,21 @@
+<idea-plugin>
+    <id>com.idea.enhanced.psi.exporter</id>
+    <name>IDEA Enhanced Context PSI Exporter</name>
+    <vendor email="team@example.com">IDEA-Enhanced-Context</vendor>
+
+    <description><![CDATA[
+    Exports IntelliJ PSI metadata and uploads it to the IDEA-Enhanced-Context bridge.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
+
+    <actions>
+        <action id="com.idea.enhanced.psi.ExportPsiAction"
+                class="com.idea.enhanced.psi.ExportPsiAction"
+                text="Export PSI to Bridge"
+                description="Traverse PSI symbols and upload them to the IDEA-Enhanced-Context bridge">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
