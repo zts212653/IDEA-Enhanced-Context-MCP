@@ -1,7 +1,7 @@
 # IDEA-Enhanced-Context · Backlog
 
 > 目标：让「IDEA + Milvus + MCP」这条链，从现在的 POC，长成一个可以在 Wushan / Petclinic 上做正式 Show Case 的可用系统（对应文档：
-> `doc/idea-enhanced-context-design.md`, `doc/embedding-layer.md`, `doc/idea-bridge-vs-not.md`, `doc/wushan-java-showcase.md`）。
+> `doc/idea-enhanced-context-design.md`, `doc/embedding-layer.md`, `doc/idea-bridge-vs-not.md`, `doc/wushan-java-showcase.md`，gRPC 代理/测试指引见 `doc/mcp-grpc-troubleshooting.md`）。
 
 ---
 
@@ -68,34 +68,41 @@
 
 ### B.1 工具输入/输出 Schema 升级
 
-- [ ] 将 MCP 工具从 `search_java_class` 升级为 `search_java_symbol`（保留旧名 alias 以兼容）：
+- [x] 将 MCP 工具从 `search_java_class` 升级为 `search_java_symbol`（保留旧名 alias 以兼容）：
   - 输入：
-    - [ ] `query: string`（自然语言或类名）
-    - [ ] `preferredLevels?: ("module" | "class" | "method")[]`
-    - [ ] `moduleHint?: string`（如 `spring-petclinic-visits-service`）
-    - [ ] `maxContextTokens?: number`（建议默认：8000）
+    - [x] `query: string`（自然语言或类名）
+    - [x] `preferredLevels?: ("module" | "class" | "method")[]`
+    - [x] `moduleHint?: string`（如 `spring-petclinic-visits-service`）
+    - [x] `maxContextTokens?: number`（建议默认：8000）
   - 输出：
-    - [ ] `stages: StageResult[]`（保持现在 `milvus-module` / `milvus-class`，后续加入 `milvus-method`）
-    - [ ] 每个命中记录中附带 `estimatedTokens` 与 `scoreHints`（参考 `embedding-layer.md` 的上下文预算策略）。
+    - [x] `stages: StageResult[]`（保持现在 `milvus-module` / `milvus-class`，后续加入 `milvus-method`）
+    - [x] 每个命中记录中附带 `estimatedTokens` 与 `scoreHints`（参考 `embedding-layer.md` 的上下文预算策略）。
 
 ### B.2 落地「动态 Top-K」策略
 
-- [ ] 在 vectordb 查询层实现 `smartSearch(query, userContext)`：
-  - [ ] 简单查询（例如只包含一个类名）使用较小 `top_k` + 只查 `class`。
-  - [ ] 复杂查询（包含「调用链」「影响分析」关键词）提高 `top_k`，并查询多层级索引。
-- [ ] 根据 `embedding-layer.md` 中的伪代码，将 `indexLevel`/`module`/`filters` 组合成 Milvus 表达式。
-- [ ] 在工具返回中暴露 `debug.strategyUsed`，方便调参。
+- [x] 在 vectordb 查询层实现 `smartSearch(query, userContext)`：
+  - [x] 简单查询（例如只包含一个类名）使用较小 `top_k` + 只查 `class`。
+  - [x] 复杂查询（包含「调用链」「影响分析」关键词）提高 `top_k`，并查询多层级索引。
+- [x] 根据 `embedding-layer.md` 中的伪代码，将 `indexLevel`/`module`/`filters` 组合成 Milvus 表达式。
+- [x] 在工具返回中暴露 `debug.strategyUsed`，方便调参。
 
 ### B.3 实现「上下文预算管理」
 
-- [ ] 在 MCP 内部引入 `ContextBudgetManager`：
-  - [ ] 输入：`maxTokens`（来自工具参数或默认值）。
-  - [ ] 在累积结果时估算每条记录的 token 数，并智能决定：
-    - [ ] 直接附带代码片段（短的）。
-    - [ ] 只附带 summary + filePath（长的）。
-- [ ] 在工具返回中显示：
-  - [ ] `contextBudget: { maxTokens, usedTokens, truncated: boolean }`。
-- [ ] 文档：把这个行为与 `doc/embedding-layer.md` 中的「上下文预算管理」章节对齐。
+- [x] 在 MCP 内部引入 `ContextBudgetManager`：
+  - [x] 输入：`maxTokens`（来自工具参数或默认值）。
+  - [x] 在累积结果时估算每条记录的 token 数，并智能决定：
+    - [x] 直接附带代码片段（短的）。
+    - [x] 只附带 summary + filePath（长的）。
+- [x] 在工具返回中显示：
+  - [x] `contextBudget: { maxTokens, usedTokens, truncated: boolean }`。
+- [x] 文档：把这个行为与 `doc/embedding-layer.md` 中的「上下文预算管理」章节对齐。
+
+### B.4 Fixture 模式 & CI 回归
+
+- [x] 将代表性的 Petclinic 场景固化为 fixture（Q1–Q5 + 典型 REST/impact）。
+- [x] MCP Server 支持 `CI_FIXTURE=1`，优先返回 fixture 结果。
+- [x] `run_eval.mjs` 增加 `--fixtureOnly`/`skipped` 逻辑，避免 CI 因缺少真实 Milvus 而失败。
+- [x] `.github/workflows/mcp-eval.yml` 切换到 fixture-only eval，确保 CI 具备再现性。
 
 ---
 

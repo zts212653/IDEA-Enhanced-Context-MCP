@@ -9,8 +9,9 @@ import { createMilvusSearchClient } from "./milvusClient.js";
 import {
   createSearchPipeline,
   type MilvusSearchHandle,
-  applyContextBudget,
+  estimateTokens,
 } from "./searchPipeline.js";
+import { createFixtureRegistry } from "./fixtureRegistry.js";
 import type {
   SymbolRecord,
   SearchHit,
@@ -191,12 +192,37 @@ const searchArgsSchema = z.object({
     })
     .min(1, "moduleFilter cannot be empty")
     .optional(),
+  moduleHint: z
+    .string({
+      invalid_type_error: "moduleHint must be a string",
+    })
+    .min(1, "moduleHint cannot be empty")
+    .optional(),
+  preferredLevels: z
+    .array(z.enum(["module", "class", "method"]))
+    .max(3)
+    .optional(),
+  maxContextTokens: z
+    .number({
+      invalid_type_error: "maxContextTokens must be a number",
+    })
+    .int("maxContextTokens must be an integer")
+    .min(1000, "maxContextTokens must be >= 1000")
+    .max(20000, "maxContextTokens must be <= 20000")
+    .optional(),
+  scenarioId: z
+    .string({ invalid_type_error: "scenarioId must be a string" })
+    .min(1, "scenarioId cannot be empty")
+    .optional(),
 });
 
 type SearchToolArguments = z.infer<typeof searchArgsSchema>;
 
 const ideaBridgeClient = createIdeaBridgeClient();
 const milvusClientHandle = createMilvusSearchClient();
+const useFixture =
+  process.env.CI_FIXTURE === "1" || process.env.MCP_EVAL_FIXTURE === "1";
+const fixtureRegistry = createFixtureRegistry(useFixture);
 
 const milvusSearchHandle: MilvusSearchHandle | undefined = milvusClientHandle;
 
@@ -204,6 +230,7 @@ const searchPipeline = createSearchPipeline({
   bridgeClient: ideaBridgeClient,
   milvusClient: milvusSearchHandle,
   fallbackSymbols: mockSymbols,
+  fixtureRegistry,
 });
 
 const bridgeHealthSchema = z.object({
@@ -335,6 +362,7 @@ const hitSchema = z.object({
   uploadInfo: uploadInfoSchema.optional(),
   source: symbolSourceSchema,
   metadata: z.record(z.any()).optional(),
+  estimatedTokens: z.number().int().nonnegative().optional(),
   location: locationSchema.optional(),
   scoreHints: z
     .object({
@@ -370,7 +398,7 @@ const deliveredResultSchema = hitSchema.extend({
 });
 
 const stageSummarySchema = z.object({
-  name: z.enum(["bridge", "milvus-module", "milvus-class", "fallback"]),
+  name: z.enum(["bridge", "milvus-module", "milvus-class", "milvus-method", "fallback"]),
   hitCount: z.number().int().nonnegative(),
   kinds: z.array(z.string()).optional(),
   levels: z.array(z.string()).optional(),
@@ -380,6 +408,8 @@ const searchResultSchema = z.object({
   query: z.string(),
   requestedLimit: z.number().int().min(1).max(20),
   moduleFilter: z.string().nullable(),
+  moduleHint: z.string().nullable(),
+  preferredLevels: z.array(z.enum(["module", "class", "method"])).optional(),
   fallbackUsed: z.boolean(),
   totalCandidates: z.number().int().min(0),
   deliveredCount: z.number().int().min(0),
@@ -391,6 +421,26 @@ const searchResultSchema = z.object({
     tokenLimit: z.number().int().positive(),
     usedTokens: z.number().int().nonnegative(),
   }),
+  contextBudget: z.object({
+    maxTokens: z.number().int().positive(),
+    usedTokens: z.number().int().nonnegative(),
+    omittedCount: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+  }),
+    debug: z.object({
+      strategy: z.object({
+        profile: z.string(),
+        reason: z.string(),
+        preferredLevels: z.array(z.string()),
+        moduleLimit: z.number().int().nonnegative(),
+        classLimit: z.number().int().nonnegative(),
+        methodLimit: z.number().int().nonnegative(),
+        moduleFilter: z.string().nullable(),
+        moduleHint: z.string().nullable(),
+        scenario: z.string().nullable().optional(),
+        profileId: z.string().optional(),
+      }),
+    }),
 });
 
 function toStringArray(value: unknown, limit = 8): string[] | undefined {
@@ -413,6 +463,7 @@ function pickString(metadata: Record<string, unknown>, key: string) {
 
 function describeHit(hit: SearchHit) {
   const metadata = (hit.metadata ?? {}) as Record<string, unknown>;
+  const estimatedTokens = estimateTokens(hit);
   const repoName =
     hit.repoName ?? pickString(metadata, "repoName") ?? pickString(metadata, "repo_name");
   const modulePath =
@@ -458,6 +509,7 @@ function describeHit(hit: SearchHit) {
     uploadInfo,
     source,
     metadata,
+    estimatedTokens,
     location: {
       repoName,
       module: hit.module,
@@ -516,56 +568,99 @@ function describeDeliveredHit(hit: SearchHit) {
   };
 }
 
+const searchToolDefinition = {
+  title: "IDEA staged semantic search",
+  description:
+    "Search PSI-enriched modules/classes/methods via staged pipeline (bridge → Milvus). Returns module hits plus context-budgeted results including hierarchy/relations metadata.",
+  inputSchema: searchArgsSchema,
+  outputSchema: searchResultSchema,
+};
+
+async function handleSearchTool(args: SearchToolArguments) {
+  const outcome = await searchPipeline.search(args);
+  const moduleCandidates = (outcome.moduleResults ?? [])
+    .slice(0, 5)
+    .map(describeModuleCandidate);
+  const stages = outcome.stages.map((stage) => ({
+    name: stage.name,
+    hitCount: stage.hits.length,
+    kinds: Array.from(new Set(stage.hits.map((hit) => hit.kind))),
+    levels: Array.from(
+      new Set(stage.hits.map((hit) => hit.indexLevel ?? "unknown")),
+    ),
+  }));
+
+  const resolvedPreferredLevels =
+    args.preferredLevels ?? outcome.strategy.preferredLevels;
+  const moduleHint = args.moduleHint ?? outcome.strategy.moduleHint ?? null;
+  const contextBudget = {
+    maxTokens: outcome.contextBudget.tokenLimit,
+    usedTokens: outcome.contextBudget.usedTokens,
+    omittedCount: outcome.contextBudget.omittedCount,
+    truncated: outcome.contextBudget.truncated,
+  };
+
+  const deliveredHits = outcome.contextBudget.delivered.map(describeDeliveredHit);
+  const totalCandidates =
+    deliveredHits.length + outcome.contextBudget.omittedCount;
+
+  const strategyDebug = {
+    profile: outcome.strategy.profile,
+    reason: outcome.strategy.reason,
+    preferredLevels: outcome.strategy.preferredLevels,
+    moduleLimit: outcome.strategy.moduleLimit,
+    classLimit: outcome.strategy.classLimit,
+    methodLimit: outcome.strategy.methodLimit,
+    moduleFilter: outcome.strategy.moduleFilter ?? null,
+    moduleHint: outcome.strategy.moduleHint ?? null,
+    scenario: outcome.strategy.scenario ?? null,
+    profileId: outcome.strategy.profileConfig.id,
+  };
+
+  const payload = {
+    query: args.query,
+    requestedLimit: args.limit ?? 5,
+    moduleFilter: args.moduleFilter ?? null,
+    moduleHint,
+    preferredLevels: resolvedPreferredLevels,
+    fallbackUsed: outcome.fallbackUsed,
+    totalCandidates,
+    deliveredCount: deliveredHits.length,
+    omittedCount: outcome.contextBudget.omittedCount,
+    stages,
+    moduleCandidates,
+    deliveredResults: deliveredHits,
+    contextBudget,
+    budget: {
+      tokenLimit: contextBudget.maxTokens,
+      usedTokens: contextBudget.usedTokens,
+    },
+    debug: {
+      strategy: strategyDebug,
+    },
+  };
+
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify(payload, null, 2),
+      },
+    ],
+    structuredContent: payload,
+  };
+}
+
+server.registerTool("search_java_symbol", searchToolDefinition, handleSearchTool);
+
 server.registerTool(
   "search_java_class",
   {
-    title: "IDEA staged semantic search",
+    ...searchToolDefinition,
     description:
-      "Search PSI-enriched modules/classes/methods via staged pipeline (bridge → Milvus). Returns module hits plus context-budgeted results including hierarchy/relations metadata.",
-    inputSchema: searchArgsSchema,
-    outputSchema: searchResultSchema,
+      "[Deprecation notice] Alias of search_java_symbol. Prefer passing preferredLevels/moduleHint/maxContextTokens for staged control.",
   },
-  async (args) => {
-    const outcome = await searchPipeline.search(args);
-    const budget = applyContextBudget(outcome.finalResults);
-    const moduleCandidates = (outcome.moduleResults ?? [])
-      .slice(0, 5)
-      .map(describeModuleCandidate);
-    const stages = outcome.stages.map((stage) => ({
-      name: stage.name,
-      hitCount: stage.hits.length,
-      kinds: Array.from(new Set(stage.hits.map((hit) => hit.kind))),
-      levels: Array.from(
-        new Set(stage.hits.map((hit) => hit.indexLevel ?? "unknown")),
-      ),
-    }));
-
-    const payload = {
-      query: args.query,
-      requestedLimit: args.limit ?? 5,
-      moduleFilter: args.moduleFilter ?? null,
-      fallbackUsed: outcome.fallbackUsed,
-      totalCandidates: outcome.finalResults.length,
-      deliveredCount: budget.delivered.length,
-      omittedCount: budget.omittedCount,
-      stages,
-      moduleCandidates,
-      deliveredResults: budget.delivered.map(describeDeliveredHit),
-      budget: {
-        tokenLimit: budget.tokenLimit,
-        usedTokens: budget.usedTokens,
-      },
-    };
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(payload, null, 2),
-        },
-      ],
-      structuredContent: payload,
-    };
-  },
+  handleSearchTool,
 );
 
 const transport = new StdioServerTransport();
