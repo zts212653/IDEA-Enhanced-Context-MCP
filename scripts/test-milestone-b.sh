@@ -82,10 +82,16 @@ check_milvus() {
 }
 
 check_psi_cache() {
-    local cache=".idea-bridge/psi-cache.json"
-    if [ ! -f "$cache" ]; then
-        echo "⚠️  WARNING: $cache not found. Ensure PSI export + ingest were run"
+  local cache=".idea-bridge/psi-cache.json"
+  if [ ! -f "$cache" ]; then
+    if [ "${ALLOW_MISSING_PSI_CACHE:-0}" = "1" ]; then
+      echo "⚠️  WARNING: $cache not found; continuing because ALLOW_MISSING_PSI_CACHE=1"
+      return
     fi
+    echo "❌ ERROR: $cache not found."
+    echo "   请先在 IDEA 中运行插件导出 PSI，并执行 'npm run ingest:milvus' 将数据写入 Milvus。"
+    exit 1
+  fi
 }
 
 echo "Section 0: Environment checks"
