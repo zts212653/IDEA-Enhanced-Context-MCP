@@ -31,6 +31,7 @@ Bridge uploads read `IDEA_BRIDGE_URL`; the MCP server expects `MILVUS_ADDRESS`, 
 4. **Documentation**: after meaningful work, append the results to `AI_CHANGELOG.md` (with date + pass name) and mention any limitations for the next agent.
 5. **Coordination**: when uncertain or a refactor touches multiple modules, pause and ask the user before proceeding.
 6. **Backlog loop**: for each BACKLOG.md item—implement & self-test, update schemas/tools/docs as needed, tick the relevant checkbox in BACKLOG.md, and log the pass in AI_CHANGELOG.md.
+7. **Commit attribution**: 所有提交都必须在 message 尾部标明代理与回合，例如 `feat: update eval harness (by codex pass4)`，保持和 CLAUDE.md 的格式一致。
 
 ## 3. Feature 收尾与推送规则
 
@@ -59,7 +60,7 @@ Bridge uploads read `IDEA_BRIDGE_URL`; the MCP server expects `MILVUS_ADDRESS`, 
    - 如果本轮修改了其他规则/设计文档（例如 `AGENTS.md`、`doc/embedding-layer.md`、`doc/idea-enhanced-context-design.md`），也必须一并暂存，禁止只推代码而不推文档。
 
 3. **提交与推送**
-   - 以单个语义化 commit 报告本次工作，如：`feat: finish Milestone B MCP search pipeline + eval harness`。
+   - 以单个语义化 commit 报告本次工作，并在 message 中注明代理身份，例如：`feat: finish Milestone B MCP search pipeline + eval harness (by codex pass5)`。
    - 使用 `git push --force-with-lease origin <当前分支>` 推送。
 
 4. **收尾检查**
