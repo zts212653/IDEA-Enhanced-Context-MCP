@@ -1,10 +1,30 @@
-import { createRequire } from "node:module";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { ContextBudgetReport, SearchOutcome, SearchStage, SearchStrategy } from "./searchPipeline.js";
 import type { SearchHit } from "./types.js";
 
-const require = createRequire(import.meta.url);
-const fixtureData = require("./fixtures/petclinic-fixtures.json");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURE_CANDIDATES = [
+  path.resolve(__dirname, "../fixtures/petclinic-fixtures.json"),
+  path.resolve(process.cwd(), "mcp-server/fixtures/petclinic-fixtures.json"),
+  path.resolve(process.cwd(), "../mcp-server/fixtures/petclinic-fixtures.json"),
+];
+
+function loadFixtureData(): FixtureMap | undefined {
+  for (const candidate of FIXTURE_CANDIDATES) {
+    try {
+      if (fs.existsSync(candidate)) {
+        const raw = fs.readFileSync(candidate, "utf8");
+        return JSON.parse(raw) as FixtureMap;
+      }
+    } catch {
+      // fall through to next candidate
+    }
+  }
+  return undefined;
+}
 
 export type FixtureEntry = {
   finalResults: SearchHit[];
@@ -63,5 +83,12 @@ export function createFixtureRegistry(enabled: boolean): FixtureRegistry | undef
   if (!enabled) {
     return undefined;
   }
-  return new FixtureRegistry(fixtureData as FixtureMap);
+  const data = loadFixtureData();
+  if (!data) {
+    console.warn(
+      "[idea-enhanced-context] fixture mode requested but petclinic fixtures were not found",
+    );
+    return undefined;
+  }
+  return new FixtureRegistry(data);
 }
