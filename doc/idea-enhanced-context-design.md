@@ -597,6 +597,12 @@ idea-enhanced-context/
     └── kubernetes/
 ```
 
+## Health & Observability
+
+- MCP `health_check` reports bridge (`/healthz` + `/api/info`) reachability, PSI cache data source, and symbol counts.
+- Milvus connectivity is verified via TCP socket checks before serving search traffic.
+- Every `/api/psi/upload` batch is logged to `.idea-bridge/upload-log.ndjson`, enabling ingestion audits.
+
 ---
 
 **文档版本**: v1.0  

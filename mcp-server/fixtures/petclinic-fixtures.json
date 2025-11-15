@@ -1,0 +1,416 @@
+{
+  "q1-entrypoints": {
+    "finalResults": [
+      {
+        "fqn": "org.springframework.samples.petclinic.admin.AdminServerApplication",
+        "kind": "CLASS",
+        "module": "spring-petclinic-admin-server",
+        "summary": "Spring Boot Admin server entry point.",
+        "metadata": {
+          "roles": ["ENTRYPOINT", "DISCOVERY_CLIENT"],
+          "filePath": "spring-petclinic-admin-server/src/main/java/org/springframework/samples/petclinic/admin/AdminServerApplication.java"
+        }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.api.ApiGatewayApplication",
+        "kind": "CLASS",
+        "module": "spring-petclinic-api-gateway",
+        "summary": "API gateway entry point.",
+        "metadata": {
+          "roles": ["ENTRYPOINT", "DISCOVERY_CLIENT"],
+          "filePath": "spring-petclinic-api-gateway/src/main/java/org/springframework/samples/petclinic/api/ApiGatewayApplication.java"
+        }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.customers.CustomersServiceApplication",
+        "kind": "CLASS",
+        "module": "spring-petclinic-customers-service",
+        "summary": "Customers microservice entry point.",
+        "metadata": {
+          "roles": ["ENTRYPOINT", "DISCOVERY_CLIENT"],
+          "filePath": "spring-petclinic-customers-service/src/main/java/org/springframework/samples/petclinic/customers/CustomersServiceApplication.java"
+        }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.vets.VetsServiceApplication",
+        "kind": "CLASS",
+        "module": "spring-petclinic-vets-service",
+        "summary": "Vets microservice entry point.",
+        "metadata": {
+          "roles": ["ENTRYPOINT", "DISCOVERY_CLIENT"],
+          "filePath": "spring-petclinic-vets-service/src/main/java/org/springframework/samples/petclinic/vets/VetsServiceApplication.java"
+        }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.visits.VisitsServiceApplication",
+        "kind": "CLASS",
+        "module": "spring-petclinic-visits-service",
+        "summary": "Visits microservice entry point.",
+        "metadata": {
+          "roles": ["ENTRYPOINT", "DISCOVERY_CLIENT"],
+          "filePath": "spring-petclinic-visits-service/src/main/java/org/springframework/samples/petclinic/visits/VisitsServiceApplication.java"
+        }
+      }
+    ],
+    "contextBudget": {
+      "usedTokens": 180,
+      "tokenLimit": 9000,
+      "omittedCount": 0,
+      "truncated": false
+    }
+  },
+  "q2-discovery": {
+    "finalResults": [
+      {
+        "fqn": "spring-petclinic-microservices:spring-petclinic-discovery-server",
+        "kind": "MODULE",
+        "module": "spring-petclinic-discovery-server",
+        "summary": "Discovery server (Eureka).",
+        "metadata": {
+          "roles": ["DISCOVERY_SERVER"],
+          "moduleMembers": ["DiscoveryServerApplication"]
+        }
+      },
+      {
+        "fqn": "spring-petclinic-microservices:spring-petclinic-admin-server",
+        "kind": "MODULE",
+        "module": "spring-petclinic-admin-server",
+        "summary": "Admin server registered as client.",
+        "metadata": {
+          "roles": ["DISCOVERY_CLIENT"],
+          "moduleMembers": ["AdminServerApplication"]
+        }
+      },
+      {
+        "fqn": "spring-petclinic-microservices:spring-petclinic-customers-service",
+        "kind": "MODULE",
+        "module": "spring-petclinic-customers-service",
+        "summary": "Customers service registered as client.",
+        "metadata": {
+          "roles": ["DISCOVERY_CLIENT"],
+          "moduleMembers": ["CustomersServiceApplication"]
+        }
+      }
+    ],
+    "contextBudget": {
+      "usedTokens": 120,
+      "tokenLimit": 9000,
+      "omittedCount": 0,
+      "truncated": false
+    }
+  },
+  "q3-visit-endpoints": {
+    "finalResults": [
+      {
+        "fqn": "org.springframework.samples.petclinic.visits.web.VisitResource",
+        "kind": "CLASS",
+        "module": "spring-petclinic-visits-service",
+        "summary": "REST controller exposing Visit CRUD endpoints.",
+        "metadata": {
+          "roles": ["REST_CONTROLLER"],
+          "endpoints": [
+            {
+              "controller": "VisitResource",
+              "module": "spring-petclinic-visits-service",
+              "httpVerb": "GET",
+              "httpPath": "/owners/{ownerId}/pets/{petId}/visits"
+            },
+            {
+              "controller": "VisitResource",
+              "module": "spring-petclinic-visits-service",
+              "httpVerb": "POST",
+              "httpPath": "/owners/{ownerId}/pets/{petId}/visits"
+            }
+          ]
+        }
+      }
+    ],
+    "contextBudget": {
+      "usedTokens": 80,
+      "tokenLimit": 9000,
+      "omittedCount": 0,
+      "truncated": false
+    }
+  },
+  "q4-visit-impact": {
+    "finalResults": [
+      {
+        "fqn": "fixture-visit-entity-group",
+        "kind": "CLASS",
+        "module": "spring-petclinic-visits-service",
+        "summary": "Entities (Visit + repository).",
+        "metadata": {
+          "groupedRole": "ENTITY",
+          "visitImpact": [
+            {
+              "fqn": "org.springframework.samples.petclinic.visits.model.Visit",
+              "module": "spring-petclinic-visits-service",
+              "roles": ["ENTITY"]
+            },
+            {
+              "fqn": "org.springframework.samples.petclinic.visits.model.VisitRepository",
+              "module": "spring-petclinic-visits-service",
+              "roles": ["REPOSITORY"]
+            }
+          ]
+        }
+      },
+      {
+        "fqn": "fixture-visit-controller-group",
+        "kind": "CLASS",
+        "module": "spring-petclinic-visits-service",
+        "summary": "Controllers affected by Visit schema.",
+        "metadata": {
+          "groupedRole": "CONTROLLER",
+          "visitImpact": [
+            {
+              "fqn": "org.springframework.samples.petclinic.visits.web.VisitResource",
+              "module": "spring-petclinic-visits-service",
+              "roles": ["REST_CONTROLLER"]
+            }
+          ]
+        }
+      },
+      {
+        "fqn": "fixture-visit-dto-group",
+        "kind": "CLASS",
+        "module": "spring-petclinic-visits-service",
+        "summary": "DTOs referencing Visit data.",
+        "metadata": {
+          "groupedRole": "DTO",
+          "visitImpact": [
+            {
+              "fqn": "org.springframework.samples.petclinic.visits.web.VisitDto",
+              "module": "spring-petclinic-visits-service",
+              "roles": ["DTO"]
+            }
+          ]
+        }
+      }
+    ],
+    "contextBudget": {
+      "usedTokens": 120,
+      "tokenLimit": 9000,
+      "omittedCount": 0,
+      "truncated": false
+    }
+  },
+  "q5-beans": {
+    "finalResults": [
+      {
+        "fqn": "org.springframework.samples.petclinic.visits.web.VisitResource",
+        "kind": "CLASS",
+        "module": "spring-petclinic-visits-service",
+        "summary": "REST controller bean",
+        "metadata": { "roles": ["REST_CONTROLLER", "SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.customers.web.OwnerResource",
+        "kind": "CLASS",
+        "module": "spring-petclinic-customers-service",
+        "summary": "Owner REST controller",
+        "metadata": { "roles": ["REST_CONTROLLER", "SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.customers.web.PetResource",
+        "kind": "CLASS",
+        "module": "spring-petclinic-customers-service",
+        "summary": "Pet REST controller",
+        "metadata": { "roles": ["REST_CONTROLLER", "SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.customers.service.OwnerService",
+        "kind": "CLASS",
+        "module": "spring-petclinic-customers-service",
+        "summary": "Owner service bean",
+        "metadata": { "roles": ["SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.vets.service.VetService",
+        "kind": "CLASS",
+        "module": "spring-petclinic-vets-service",
+        "summary": "Vet service bean",
+        "metadata": { "roles": ["SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.visits.service.VisitService",
+        "kind": "CLASS",
+        "module": "spring-petclinic-visits-service",
+        "summary": "Visit service bean",
+        "metadata": { "roles": ["SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.customers.repository.OwnerRepository",
+        "kind": "CLASS",
+        "module": "spring-petclinic-customers-service",
+        "summary": "Owner repository",
+        "metadata": { "roles": ["REPOSITORY", "SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.customers.repository.PetRepository",
+        "kind": "CLASS",
+        "module": "spring-petclinic-customers-service",
+        "summary": "Pet repository",
+        "metadata": { "roles": ["REPOSITORY", "SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.vets.repository.VetRepository",
+        "kind": "CLASS",
+        "module": "spring-petclinic-vets-service",
+        "summary": "Vet repository",
+        "metadata": { "roles": ["REPOSITORY", "SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.visits.repository.VisitRepository",
+        "kind": "CLASS",
+        "module": "spring-petclinic-visits-service",
+        "summary": "Visit repository",
+        "metadata": { "roles": ["REPOSITORY", "SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.api.boundary.web.ApiGatewayController",
+        "kind": "CLASS",
+        "module": "spring-petclinic-api-gateway",
+        "summary": "Gateway controller",
+        "metadata": { "roles": ["REST_CONTROLLER", "SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.admin.config.AdminConfig",
+        "kind": "CLASS",
+        "module": "spring-petclinic-admin-server",
+        "summary": "Admin configuration bean",
+        "metadata": { "roles": ["CONFIG", "SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.api.application.OwnersServiceClient",
+        "kind": "CLASS",
+        "module": "spring-petclinic-api-gateway",
+        "summary": "REST client bean",
+        "metadata": { "roles": ["SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.customers.web.ResourceNotFoundAdvice",
+        "kind": "CLASS",
+        "module": "spring-petclinic-customers-service",
+        "summary": "Controller advice bean",
+        "metadata": { "roles": ["SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.genai.service.PetclinicChatClient",
+        "kind": "CLASS",
+        "module": "spring-petclinic-genai-service",
+        "summary": "GenAI client bean",
+        "metadata": { "roles": ["SPRING_BEAN"] }
+      },
+      {
+        "fqn": "org.springframework.samples.petclinic.genai.config.GenAiConfig",
+        "kind": "CLASS",
+        "module": "spring-petclinic-genai-service",
+        "summary": "GenAI config bean",
+        "metadata": { "roles": ["CONFIG", "SPRING_BEAN"] }
+      }
+    ],
+    "contextBudget": {
+      "usedTokens": 520,
+      "tokenLimit": 4000,
+      "omittedCount": 0,
+      "truncated": false
+    }
+  },
+  "rest-spring-petclinic-customers-service-owner-0": {
+    "finalResults": [
+      {
+        "fqn": "org.springframework.samples.petclinic.customers.web.OwnerResource",
+        "kind": "CLASS",
+        "module": "spring-petclinic-customers-service",
+        "summary": "Owner REST controller",
+        "metadata": {
+          "roles": ["REST_CONTROLLER"],
+          "endpoints": [
+            {
+              "controller": "OwnerResource",
+              "module": "spring-petclinic-customers-service",
+              "httpVerb": "GET",
+              "httpPath": "/owners/{ownerId}"
+            },
+            {
+              "controller": "OwnerResource",
+              "module": "spring-petclinic-customers-service",
+              "httpVerb": "POST",
+              "httpPath": "/owners"
+            }
+          ]
+        }
+      }
+    ],
+    "contextBudget": {
+      "usedTokens": 90,
+      "tokenLimit": 9000,
+      "omittedCount": 0,
+      "truncated": false
+    }
+  },
+  "impact-spring-petclinic-customers-service-pet-0": {
+    "finalResults": [
+      {
+        "fqn": "fixture-pet-entity-group",
+        "kind": "CLASS",
+        "module": "spring-petclinic-customers-service",
+        "summary": "Pet entity + repository",
+        "metadata": {
+          "groupedRole": "ENTITY",
+          "visitImpact": [
+            {
+              "fqn": "org.springframework.samples.petclinic.customers.model.Pet",
+              "module": "spring-petclinic-customers-service",
+              "roles": ["ENTITY"]
+            },
+            {
+              "fqn": "org.springframework.samples.petclinic.customers.model.PetRepository",
+              "module": "spring-petclinic-customers-service",
+              "roles": ["REPOSITORY"]
+            }
+          ]
+        }
+      },
+      {
+        "fqn": "fixture-pet-controller-group",
+        "kind": "CLASS",
+        "module": "spring-petclinic-customers-service",
+        "summary": "Controllers touching Pet DTOs",
+        "metadata": {
+          "groupedRole": "CONTROLLER",
+          "visitImpact": [
+            {
+              "fqn": "org.springframework.samples.petclinic.customers.web.PetResource",
+              "module": "spring-petclinic-customers-service",
+              "roles": ["REST_CONTROLLER"]
+            }
+          ]
+        }
+      },
+      {
+        "fqn": "fixture-pet-dto-group",
+        "kind": "CLASS",
+        "module": "spring-petclinic-customers-service",
+        "summary": "DTOs that mirror Pet fields",
+        "metadata": {
+          "groupedRole": "DTO",
+          "visitImpact": [
+            {
+              "fqn": "org.springframework.samples.petclinic.customers.web.PetDetails",
+              "module": "spring-petclinic-customers-service",
+              "roles": ["DTO"]
+            }
+          ]
+        }
+      }
+    ],
+    "contextBudget": {
+      "usedTokens": 120,
+      "tokenLimit": 9000,
+      "omittedCount": 0,
+      "truncated": false
+    }
+  }
+}

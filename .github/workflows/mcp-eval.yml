@@ -1,0 +1,74 @@
+name: MCP Evaluation
+
+on:
+  pull_request:
+    branches: [ mvp ]
+    paths:
+      - 'mcp-server/src/searchPipeline.ts'
+      - 'mcp-server/scripts/**'
+      - 'doc/SCENARIO_*.md'
+      - 'doc/README-eval.md'
+  workflow_dispatch: {}
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+
+    env:
+      IDEA_BRIDGE_URL: ${{ secrets.IDEA_BRIDGE_URL }}
+      MILVUS_ADDRESS: ${{ secrets.MILVUS_ADDRESS }}
+      MILVUS_COLLECTION: ${{ secrets.MILVUS_COLLECTION }}
+      MILVUS_USERNAME: ${{ secrets.MILVUS_USERNAME }}
+      MILVUS_PASSWORD: ${{ secrets.MILVUS_PASSWORD }}
+      CI_FIXTURE: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install workspace dependencies
+        run: |
+          cd mcp-server
+          npm install
+          cd ..
+          python -m venv .venv
+          source .venv/bin/activate
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pymilvus
+
+      - name: Build MCP server
+        run: |
+          cd mcp-server
+          npm run build
+
+      - name: Fetch sample microservices repo
+        run: |
+          if [ ! -d ../spring-petclinic-microservices ]; then
+            cd ..
+            git clone https://github.com/spring-petclinic/spring-petclinic-microservices.git
+          fi
+
+      - name: Generate evaluation scenarios
+        run: |
+          cd mcp-server
+          node scripts/generate_scenarios.mjs --projectRoot=../spring-petclinic-microservices --output=../tmp/eval-scenarios.json
+
+      - name: Run MCP evaluation
+        env:
+          DISABLE_SCHEMA_CHECK: "1"
+          PREFERRED_LEVELS: module,class,method
+          MAX_CONTEXT_TOKENS: "9000"
+        run: |
+          cd mcp-server
+          source ../.venv/bin/activate || true
+          node scripts/run_eval.mjs --scenarios=../tmp/eval-scenarios.json --fixtureOnly

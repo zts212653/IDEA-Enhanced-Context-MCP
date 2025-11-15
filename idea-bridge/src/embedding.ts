@@ -33,6 +33,7 @@ export function symbolToEmbeddingText(symbol: SymbolRecord): string {
     `Symbol: ${symbol.fqn}`,
     `Kind: ${symbol.kind}`,
     `Visibility: ${symbol.typeInfo.visibility}`,
+    `Type traits: interface=${symbol.typeInfo.isInterface}, abstract=${symbol.typeInfo.isAbstract}, final=${symbol.typeInfo.isFinal}`,
     `Modifiers: ${symbol.typeInfo.modifiers.join(" ") || "none"}`,
     `Package: ${symbol.packageName}`,
     `Summary: ${symbol.summary}`,
@@ -58,6 +59,12 @@ export function symbolToEmbeddingText(symbol: SymbolRecord): string {
     lines.push(`Implements: ${symbol.implements.join(", ")}`);
   }
 
+  if (symbol.hierarchy) {
+    lines.push(
+      `Hierarchy: super=${symbol.hierarchy.superClass ?? "Object"}, interfaces=${symbol.hierarchy.interfaces.join(", ") || "none"}`,
+    );
+  }
+
   if (symbol.fields.length > 0) {
     lines.push("Fields:");
     for (const field of symbol.fields.slice(0, 10)) {
@@ -80,6 +87,24 @@ export function symbolToEmbeddingText(symbol: SymbolRecord): string {
     }
   }
 
+  if (symbol.relations) {
+    if (symbol.relations.calls.length > 0) {
+      lines.push(
+        `Calls: ${symbol.relations.calls.slice(0, 10).join(", ")}`,
+      );
+    }
+    if (symbol.relations.calledBy.length > 0) {
+      lines.push(
+        `Called by: ${symbol.relations.calledBy.slice(0, 10).join(", ")}`,
+      );
+    }
+    if (symbol.relations.references.length > 0) {
+      lines.push(
+        `References: ${symbol.relations.references.slice(0, 10).join(", ")}`,
+      );
+    }
+  }
+
   if (symbol.springInfo?.isSpringBean) {
     lines.push(
       `Spring bean type: ${symbol.springInfo.beanType}, bean name: ${symbol.springInfo.beanName}`,
@@ -92,6 +117,10 @@ export function symbolToEmbeddingText(symbol: SymbolRecord): string {
       );
     }
   }
+
+  lines.push(
+    `Quality: methods=${symbol.quality.methodCount}, fields=${symbol.quality.fieldCount}, annotations=${symbol.quality.annotationCount}, hasJavadoc=${symbol.quality.hasJavadoc}`,
+  );
 
   lines.push(`Source: ${symbol.relativePath}`);
   const text = lines.join("\n");

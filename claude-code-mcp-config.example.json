@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "idea-enhanced-context": {
+      "command": "node",
+      "args": [
+        "/Users/lysander/projects/IDEA-Enhanced-Context-MCP/mcp-server/dist/index.js"
+      ],
+      "env": {
+        "IDEA_BRIDGE_URL": "http://127.0.0.1:63000",
+        "MILVUS_ADDRESS": "127.0.0.1:19530"
+      }
+    }
+  }
+}

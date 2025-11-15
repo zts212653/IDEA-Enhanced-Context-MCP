@@ -5,66 +5,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { SearchArguments, MilvusSearchHandle } from "./searchPipeline.js";
-import type { SymbolRecord } from "./types.js";
-
-const DEFAULT_ADDRESS = "127.0.0.1:19530";
-const DEFAULT_COLLECTION = "idea_symbols";
-const DEFAULT_VECTOR_FIELD = "embedding";
+import type { SymbolRecord, UploadInfo } from "./types.js";
+import { resolveMilvusConfig, type MilvusResolvedConfig } from "./milvusConfig.js";
+import { ensureCollectionExists } from "./vectordb/schema.js";
 
 const scriptPath = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../idea-bridge/scripts/milvus_query.py",
 );
-
-type MilvusConfig = {
-  address: string;
-  collection: string;
-  vectorField: string;
-  metricType: string;
-  searchParams: Record<string, number | string>;
-  outputFields: string[];
-  embeddingModel: string;
-  embeddingHost: string;
-};
-
-function resolveConfig(): MilvusConfig | undefined {
-  if (process.env.DISABLE_MILVUS === "1") {
-    return undefined;
-  }
-
-  return {
-    address: process.env.MILVUS_ADDRESS ?? DEFAULT_ADDRESS,
-    collection:
-      process.env.MILVUS_COLLECTION ??
-      process.env.MILVUS_COLLECTION_NAME ??
-      DEFAULT_COLLECTION,
-    vectorField:
-      process.env.MILVUS_VECTOR_FIELD ?? process.env.MILVUS_ANNS_FIELD ??
-      DEFAULT_VECTOR_FIELD,
-    metricType: process.env.MILVUS_METRIC ?? "IP",
-    searchParams: {
-      nprobe: Number(process.env.MILVUS_PARAM_NPROBE ?? 16),
-    },
-    outputFields: [
-      "index_level",
-      "repo_name",
-      "module_name",
-      "package_name",
-      "symbol_name",
-      "summary",
-      "metadata",
-      "fqn",
-    ],
-    embeddingModel:
-      process.env.IEC_EMBED_MODEL ??
-      process.env.EMBED_MODEL ??
-      "manutic/nomic-embed-code",
-    embeddingHost:
-      process.env.OLLAMA_HOST ??
-      process.env.EMBEDDING_HOST ??
-      "http://127.0.0.1:11434",
-  };
-}
 
 async function generateEmbedding(
   text: string,
@@ -110,6 +58,78 @@ function parseMetadata(metadata?: string) {
   }
 }
 
+function asStringArray(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    return value.filter((item) => typeof item === "string") as string[];
+  }
+  if (typeof value === "string" && value.length > 0) {
+    return [value];
+  }
+  return undefined;
+}
+
+function normalizeHierarchy(meta: Record<string, any> | undefined) {
+  if (!meta) return undefined;
+  if (meta.hierarchy) {
+    return {
+      superClass: meta.hierarchy.superClass,
+      interfaces: asStringArray(meta.hierarchy.interfaces) ?? [],
+    };
+  }
+  if (meta.hierarchySummary) {
+    return {
+      superClass: Array.isArray(meta.hierarchySummary.superClasses)
+        ? meta.hierarchySummary.superClasses[0]
+        : meta.hierarchySummary.superClasses,
+      interfaces:
+        asStringArray(meta.hierarchySummary.interfaces) ??
+        asStringArray(meta.hierarchySummary.superInterfaces) ??
+        [],
+    };
+  }
+  if (meta.superClass || meta.interfaces) {
+    return {
+      superClass: meta.superClass,
+      interfaces: asStringArray(meta.interfaces) ?? [],
+    };
+  }
+  return undefined;
+}
+
+function normalizeRelations(meta: Record<string, any> | undefined) {
+  if (!meta?.relations) return undefined;
+  return {
+    calls: asStringArray(meta.relations.calls),
+    calledBy: asStringArray(meta.relations.calledBy),
+    references: asStringArray(meta.relations.references),
+  };
+}
+
+function normalizeSpring(meta: Record<string, any> | undefined) {
+  const spring = meta?.spring ?? meta?.springInfo;
+  if (!spring) return undefined;
+  return {
+    isSpringBean: spring.isSpringBean,
+    beanType: spring.beanType,
+    beanName: spring.beanName,
+    autoWiredDependencies: asStringArray(spring.autoWiredDependencies),
+    annotations: asStringArray(spring.annotations),
+  };
+}
+
+function normalizeUpload(meta: Record<string, any> | undefined): UploadInfo | undefined {
+  if (!meta) return undefined;
+  const upload = meta.upload ?? meta.uploadMeta;
+  if (!upload || typeof upload !== "object") return undefined;
+  return {
+    schemaVersion: upload.schemaVersion ?? upload.version,
+    projectName: upload.projectName,
+    generatedAt: upload.generatedAt,
+    uploadedAt: upload.uploadedAt ?? upload.timestamp,
+    batchCount: upload.batchCount,
+  };
+}
+
 function formatRecords(raw: any[]): SymbolRecord[] {
   return raw.map((row) => {
     const parsed = parseMetadata(row.metadata);
@@ -118,14 +138,31 @@ function formatRecords(raw: any[]): SymbolRecord[] {
     if (level === "method") kind = "METHOD";
     else if (level === "module") kind = "MODULE";
     else if (level === "repository") kind = "REPOSITORY";
+    const metadata = parsed ?? {};
+    const repoName = row.repo_name ?? metadata.repoName ?? metadata.repo_name;
+    const modulePath = row.module_path ?? metadata.modulePath;
+    const packageName = row.package_name ?? metadata.package ?? metadata.packageName;
+
+    const uploadInfo = normalizeUpload(parsed);
+    const source =
+      (metadata.source as "psi-cache" | "regex" | undefined) ??
+      (uploadInfo ? "psi-cache" : "regex");
 
     return {
       fqn: row.fqn ?? row.symbol_name ?? row.repo_name ?? "unknown",
       kind,
       module: row.module_name ?? parsed?.module ?? "default",
+      modulePath,
+      repoName,
+      packageName,
       summary: row.summary ?? parsed?.summary ?? "",
-      metadata: parsed,
+      metadata,
       indexLevel: level,
+      relations: normalizeRelations(metadata),
+      hierarchy: normalizeHierarchy(metadata),
+      springInfo: normalizeSpring(metadata),
+      uploadInfo,
+      source,
       scoreHints: {
         references: parsed?.references ?? parsed?.referenceCount,
         lastModifiedDays: parsed?.lastModifiedDays,
@@ -159,14 +196,28 @@ async function runPythonSearch(payload: Record<string, unknown>): Promise<any[]>
   return parsed.results ?? [];
 }
 
+const schemaCheckDisabled =
+  process.env.DISABLE_SCHEMA_CHECK === "1" ||
+  process.env.DISABLE_SCHEMA_CHECK?.toLowerCase() === "true";
+
 export function createMilvusSearchClient(): MilvusSearchHandle | undefined {
-  const config = resolveConfig();
+  const config = resolveMilvusConfig();
   if (!config) {
     return undefined;
   }
 
+  let schemaEnsured = false;
+
   return {
     async search(args: SearchArguments) {
+      if (!schemaEnsured && !schemaCheckDisabled) {
+        try {
+          await ensureCollectionExists(config);
+          schemaEnsured = true;
+        } catch (error) {
+          console.warn("[idea-enhanced-context] failed to ensure Milvus schema:", error);
+        }
+      }
       let embedding = await generateEmbedding(
         args.query,
         config.embeddingModel,
@@ -186,7 +237,7 @@ export function createMilvusSearchClient(): MilvusSearchHandle | undefined {
           vector: embedding,
           limit,
           moduleFilter: args.moduleFilter,
-          levels: ["class", "method"],
+          levels: args.preferredLevels ?? ["class", "method"],
           milvusAddress: config.address,
           metricType: config.metricType,
           searchParams: config.searchParams,

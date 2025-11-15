@@ -36,7 +36,7 @@ describe("searchPipeline", () => {
     });
 
     const results = await pipeline.search(baseArgs);
-    expect(results[0]?.fqn).toBe("com.example.UserService");
+    expect(results.finalResults[0]?.fqn).toBe("com.example.UserService");
     expect(bridgeClient.searchSymbols).toHaveBeenCalledTimes(1);
   });
 
@@ -58,7 +58,7 @@ describe("searchPipeline", () => {
     });
 
     const results = await pipeline.search(baseArgs);
-    expect(results[0]?.fqn).toBe("com.example.billing.InvoiceService");
+    expect(results.finalResults[0]?.fqn).toBe("com.example.billing.InvoiceService");
   });
 
   it("uses fallback data when no upstream sources return results", async () => {
@@ -73,6 +73,6 @@ describe("searchPipeline", () => {
     });
 
     const results = await pipeline.search(baseArgs);
-    expect(results[0]?.fqn).toBe("com.example.DefaultService");
+    expect(results.finalResults[0]?.fqn).toBe("com.example.DefaultService");
   });
 });

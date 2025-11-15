@@ -4,19 +4,21 @@ import type { SymbolRecord } from "./types.js";
 
 const bridgeResponseSchema = z.object({
   results: z.array(
-    z.object({
-      fqn: z.string(),
-      kind: z.enum(["CLASS", "INTERFACE", "METHOD"]),
-      module: z.string(),
-      summary: z.string(),
-      scoreHints: z
-        .object({
-          references: z.number().int().nonnegative().optional(),
-          lastModifiedDays: z.number().int().nonnegative().optional(),
-        })
-        .partial()
-        .optional(),
-    }),
+    z
+      .object({
+        fqn: z.string(),
+        kind: z.enum(["CLASS", "INTERFACE", "METHOD"]),
+        module: z.string(),
+        summary: z.string(),
+        scoreHints: z
+          .object({
+            references: z.number().int().nonnegative().optional(),
+            lastModifiedDays: z.number().int().nonnegative().optional(),
+          })
+          .partial()
+          .optional(),
+      })
+      .passthrough(),
   ),
 });
 

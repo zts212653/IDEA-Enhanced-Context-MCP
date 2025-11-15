@@ -4,6 +4,7 @@ import os from "node:os";
 export interface BridgeConfig {
   projectRoot: string;
   port: number;
+  psiCachePath: string;
   milvusHttpEndpoint: string;
   milvusGrpcAddress: string;
   milvusCollection: string;
@@ -26,9 +27,14 @@ export function loadConfig(): BridgeConfig {
     process.env.BRIDGE_PROJECT_ROOT ??
     path.join(os.homedir(), "projects", "spring-petclinic-microservices");
 
+  const psiCachePath =
+    process.env.BRIDGE_PSI_CACHE ??
+    path.join(projectRoot, ".idea-bridge", "psi-cache.json");
+
   return {
     projectRoot: resolveTilde(projectRoot),
     port: Number(process.env.BRIDGE_PORT ?? 63000),
+    psiCachePath: resolveTilde(psiCachePath),
     milvusHttpEndpoint:
       process.env.MILVUS_HTTP_ENDPOINT ?? "http://127.0.0.1:9091",
     milvusGrpcAddress: process.env.MILVUS_ADDRESS ?? "127.0.0.1:19530",
