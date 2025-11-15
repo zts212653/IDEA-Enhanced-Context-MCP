@@ -371,6 +371,8 @@ budget = ContextBudgetManager(max_tokens=8000)
 filtered_results = [budget.add_result(r) for r in search_results]
 ```
 
+目前 MCP 工具 `search_java_symbol` 已经按这套策略返回 `contextBudget` 字段（`maxTokens / usedTokens / truncated`），并在 `debug.strategy` 中描述本次动态 Top-K 计划（包含模块/类/方法 limit、是否启用 module hint 等）。也就是说，调用方不需要重新估算 token，直接读取返回体即可知道还有多少预算可以继续添加上下文。
+
 ---
 
 ## 📈 存储量对比
