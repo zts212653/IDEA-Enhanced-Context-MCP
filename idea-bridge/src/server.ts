@@ -16,7 +16,13 @@ const DEFAULT_SCHEMA_VERSION = 2;
 
 async function bootstrap() {
   const config = loadConfig();
-  const fastify = Fastify({ logger: true });
+  const bodyLimit = Number(
+    process.env.BRIDGE_BODY_LIMIT ?? 50 * 1024 * 1024,
+  );
+  const fastify = Fastify({
+    logger: true,
+    bodyLimit,
+  });
 
   const initialLoad = await loadInitialSymbols(config, fastify.log);
   let records: SymbolRecord[] = initialLoad.records;

@@ -97,6 +97,7 @@ The MCP server supports the following environment variables:
 - `IDEA_BRIDGE_URL` - Bridge server base URL (default: `http://127.0.0.1:63000`)
 - `IDEA_BRIDGE_BASE_URL` - Alternative name for bridge URL
 - `IDEA_BRIDGE_HTTP` - Alternative name for bridge URL
+- `BRIDGE_BODY_LIMIT` - Maximum upload payload size in bytes (default: `50 * 1024 * 1024`). Increase this if PSI export batches trigger `413 Payload Too Large`.
 
 ### Milvus Vector Database
 
