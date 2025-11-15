@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **BEFORE starting any work, ALWAYS read:**
 - **`AGENTS_CONTRIBUTING.md`** - Mandatory guidelines for AI collaboration
 - **`AI_CHANGELOG.md`** - Recent changes by other AI agents (Codex, etc.)
+- **`AGENTS.md`** - Repository-specific workflow & configuration tips
 - Run `git status` and `git log --oneline -5` to see current state
 
 **Key Rules:**
@@ -17,6 +18,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **Write failing tests before fixing bugs** - Lock bugs with tests
 4. **Never hide errors** - No empty catch blocks or commented tests
 5. **Attribute all commits** - Use format: `fix: description (by claude pass1)`
+6. **Follow the Backlog loop** - Implement → Self-test → Update docs → Tick BACKLOG → Log in AI_CHANGELOG
+7. **Feature completion ritual** - When claiming "milestone done", run build → stage → commit → push → verify
 
 See `AGENTS_CONTRIBUTING.md` for complete protocol.
 
@@ -77,6 +80,14 @@ npm run test:watch                 # Vitest in watch mode
 **⚠️ Important**: This is an ES module project. `dev` script uses compiled code, NOT ts-node.
 
 The MCP server exposes `search_java_class` tool via stdio transport. Configure in Claude Desktop/Code by adding to MCP settings (see `doc/mcp-configuration-guide.md`).
+
+## MCP Testing & Troubleshooting
+
+When running MCP queries locally, corporate proxies may break gRPC connections to Milvus. See `doc/mcp-grpc-troubleshooting.md` for:
+- How to clear proxy env vars before running tests
+- The exact command: `source .venv/bin/activate && DISABLE_SCHEMA_CHECK=1 npm run tool:search -- "<query>"`
+- Context budget testing with `MAX_CONTEXT_TOKENS=4000`
+- Scenario-based evaluation using `scripts/run_eval.mjs`
 
 ## Architecture Highlights
 
