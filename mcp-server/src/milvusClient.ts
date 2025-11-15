@@ -6,66 +6,13 @@ import { fileURLToPath } from "node:url";
 
 import type { SearchArguments, MilvusSearchHandle } from "./searchPipeline.js";
 import type { SymbolRecord, UploadInfo } from "./types.js";
-
-const DEFAULT_ADDRESS = "127.0.0.1:19530";
-const DEFAULT_COLLECTION = "idea_symbols";
-const DEFAULT_VECTOR_FIELD = "embedding";
+import { resolveMilvusConfig, type MilvusResolvedConfig } from "./milvusConfig.js";
+import { ensureCollectionExists } from "./vectordb/schema.js";
 
 const scriptPath = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../idea-bridge/scripts/milvus_query.py",
 );
-
-type MilvusConfig = {
-  address: string;
-  collection: string;
-  vectorField: string;
-  metricType: string;
-  searchParams: Record<string, number | string>;
-  outputFields: string[];
-  embeddingModel: string;
-  embeddingHost: string;
-};
-
-function resolveConfig(): MilvusConfig | undefined {
-  if (process.env.DISABLE_MILVUS === "1") {
-    return undefined;
-  }
-
-  return {
-    address: process.env.MILVUS_ADDRESS ?? DEFAULT_ADDRESS,
-    collection:
-      process.env.MILVUS_COLLECTION ??
-      process.env.MILVUS_COLLECTION_NAME ??
-      DEFAULT_COLLECTION,
-    vectorField:
-      process.env.MILVUS_VECTOR_FIELD ?? process.env.MILVUS_ANNS_FIELD ??
-      DEFAULT_VECTOR_FIELD,
-    metricType: process.env.MILVUS_METRIC ?? "IP",
-    searchParams: {
-      nprobe: Number(process.env.MILVUS_PARAM_NPROBE ?? 16),
-    },
-    outputFields: [
-      "index_level",
-      "repo_name",
-      "module_name",
-      "module_path",
-      "package_name",
-      "symbol_name",
-      "summary",
-      "metadata",
-      "fqn",
-    ],
-    embeddingModel:
-      process.env.IEC_EMBED_MODEL ??
-      process.env.EMBED_MODEL ??
-      "manutic/nomic-embed-code",
-    embeddingHost:
-      process.env.OLLAMA_HOST ??
-      process.env.EMBEDDING_HOST ??
-      "http://127.0.0.1:11434",
-  };
-}
 
 async function generateEmbedding(
   text: string,
@@ -197,6 +144,9 @@ function formatRecords(raw: any[]): SymbolRecord[] {
     const packageName = row.package_name ?? metadata.package ?? metadata.packageName;
 
     const uploadInfo = normalizeUpload(parsed);
+    const source =
+      (metadata.source as "psi-cache" | "regex" | undefined) ??
+      (uploadInfo ? "psi-cache" : "regex");
 
     return {
       fqn: row.fqn ?? row.symbol_name ?? row.repo_name ?? "unknown",
@@ -212,6 +162,7 @@ function formatRecords(raw: any[]): SymbolRecord[] {
       hierarchy: normalizeHierarchy(metadata),
       springInfo: normalizeSpring(metadata),
       uploadInfo,
+      source,
       scoreHints: {
         references: parsed?.references ?? parsed?.referenceCount,
         lastModifiedDays: parsed?.lastModifiedDays,
@@ -245,14 +196,28 @@ async function runPythonSearch(payload: Record<string, unknown>): Promise<any[]>
   return parsed.results ?? [];
 }
 
+const schemaCheckDisabled =
+  process.env.DISABLE_SCHEMA_CHECK === "1" ||
+  process.env.DISABLE_SCHEMA_CHECK?.toLowerCase() === "true";
+
 export function createMilvusSearchClient(): MilvusSearchHandle | undefined {
-  const config = resolveConfig();
+  const config = resolveMilvusConfig();
   if (!config) {
     return undefined;
   }
 
+  let schemaEnsured = false;
+
   return {
     async search(args: SearchArguments) {
+      if (!schemaEnsured && !schemaCheckDisabled) {
+        try {
+          await ensureCollectionExists(config);
+          schemaEnsured = true;
+        } catch (error) {
+          console.warn("[idea-enhanced-context] failed to ensure Milvus schema:", error);
+        }
+      }
       let embedding = await generateEmbedding(
         args.query,
         config.embeddingModel,

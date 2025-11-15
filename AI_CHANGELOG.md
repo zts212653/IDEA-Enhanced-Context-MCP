@@ -245,6 +245,56 @@ docs: add multi-agent collaboration guidelines (by claude pass1)
 
 ---
 
+### Codex Pass 7: Milestone A.2/A.3 – Schema Hardening & PSI Cache Module
+
+**Session Context**: Close out Milestone A items by shipping the Milvus schema/inspection helpers, PSI cache data-source module, and documentation/backlog updates that capture the PSI-first ingestion loop.
+
+**Files Changed**:
+- Bridge: `idea-bridge/src/server.ts`, `idea-bridge/src/psiDataSource.ts`, `idea-bridge/src/types.ts`
+- MCP: `mcp-server/src/index.ts`, `mcp-server/src/milvusClient.ts`, `mcp-server/src/milvusConfig.ts`, `mcp-server/src/vectordb/schema.ts`, `mcp-server/src/scripts/inspectSchema.ts`, `mcp-server/package.json`
+- Ops scripts & docs: `scripts/check-mcp-status.sh`, `scripts/e2e-psi.sh`, `doc/psi-integration-plan.md`, `doc/idea-bridge-vs-not.md`, `doc/embedding-layer.md`, `BACKLOG.md`, `AGENTS.md`
+
+**What / Why**:
+1. **Schema guardrails (A.2)** – Added a dedicated `vectordb/schema.ts` with `ensureCollectionExists()` + IVF index creation and a `npm run inspect-schema` script so on-call can see real-time Milvus schema/index state. Updated `doc/embedding-layer.md` with an “Actual Schema” section referencing the script.
+2. **PSI cache source tracking (A.3)** – Introduced `psiDataSource.loadInitialSymbols()` so the bridge announces whether it booted from `.idea-bridge/psi-cache.json` or regex fallback. `/api/psi/upload` batches now tag every symbol with `uploadMeta` + `source`, persist upload logs, and repopulate the cache atomically.
+3. **MCP telemetry + backlog loop** – `search_java_class` propagates `source`, upload info, and schema metadata from Milvus, while `scripts/check-mcp-status.sh`/`scripts/e2e-psi.sh` document the validation loop. Updated `BACKLOG.md` (A.1–A.3 checked), `doc/psi-integration-plan.md`, and `AGENTS.md` (“Backlog loop” bullet) so future agents follow the implement→self-test→document flow.
+
+**Testing**:
+- `cd idea-bridge && npm run build`
+- `cd mcp-server && npm run build`
+- `scripts/e2e-psi.sh` referenced in docs but **not** run inside Codex (requires IntelliJ+Milvus+Ollama); noted expectation for on-host runs.
+
+**Next Steps**:
+1. Execute `scripts/e2e-psi.sh` on a host with Milvus/Ollama + IntelliJ exporter ready, then re-run MCP queries to confirm `source="psi-cache"` shows up in hits.
+2. Move to Milestone B (tool rename + staged output/ budgeting) now that schema + PSI cache foundation is stable.
+
+---
+
+### Codex Pass 8: `DISABLE_SCHEMA_CHECK` + Successful `scripts/e2e-psi.sh`
+
+**Session Context**: The renewed request to run `scripts/e2e-psi.sh` uncovered two blockers—CommonJS `require` can’t load our ESM dist files, and the Codex sandbox still blocks the Milvus gRPC ensure step.
+
+**Files Changed**:
+- `mcp-server/src/milvusClient.ts`
+- `scripts/e2e-psi.sh`
+
+**What / Why**:
+1. Added a `DISABLE_SCHEMA_CHECK` environment flag so Milvus searches can skip `ensureCollectionExists()` when the environment rejects gRPC to `127.0.0.1:19530`. The data path still routes through the Python helper, so search results are unaffected.
+2. Updated the E2E script to build the MCP server before querying, run the sanity check under `node --input-type=module`, and export `DISABLE_SCHEMA_CHECK=1` for sandboxes (with a comment explaining the workaround).
+
+**Testing**:
+- `source .venv/bin/activate && ./scripts/e2e-psi.sh` now completes:
+  1. IntelliJ exporter build (`./gradlew clean build`)
+  2. `npm run ingest:milvus` → 210 Petclinic rows, 12 fallback embeddings logged
+  3. MCP sanity query returns staged results (first hit: `org.springframework.samples.petclinic.customers.CustomersServiceApplication`)
+  4. Script exits with “Completed end-to-end verification”
+
+**Next Steps**:
+- When running outside sandboxes, omit `DISABLE_SCHEMA_CHECK` so schema mismatches get auto-healed.
+- Consider adding CI coverage once Milvus/Ollama services exist in automation.
+
+---
+
 ### Claude Code Pass 2: Fix Codex MCP Configuration
 
 **Session Context**: User reported that Codex's self-configured MCP server showed "Tools: (none)" despite being marked as enabled. Investigation revealed ts-node ES module resolution issues.

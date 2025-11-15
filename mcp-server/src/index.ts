@@ -297,6 +297,16 @@ const springInfoSchema = z
   })
   .partial();
 
+const uploadInfoSchema = z
+  .object({
+    schemaVersion: z.number().optional(),
+    projectName: z.string().nullable().optional(),
+    generatedAt: z.string().nullable().optional(),
+    uploadedAt: z.string().nullable().optional(),
+    batchCount: z.number().nullable().optional(),
+  })
+  .partial();
+
 const locationSchema = z
   .object({
     repoName: z.string().nullable().optional(),
@@ -306,6 +316,8 @@ const locationSchema = z
     filePath: z.string().nullable().optional(),
   })
   .partial();
+
+const symbolSourceSchema = z.enum(["psi-cache", "regex"]).optional();
 
 const hitSchema = z.object({
   fqn: z.string(),
@@ -320,6 +332,8 @@ const hitSchema = z.object({
   relations: relationInfoSchema.optional(),
   hierarchy: hierarchyInfoSchema.optional(),
   springInfo: springInfoSchema.optional(),
+  uploadInfo: uploadInfoSchema.optional(),
+  source: symbolSourceSchema,
   metadata: z.record(z.any()).optional(),
   location: locationSchema.optional(),
   scoreHints: z
@@ -423,6 +437,10 @@ function describeHit(hit: SearchHit) {
     hit.uploadInfo ??
     ((metadata.upload as UploadInfo | undefined) ??
       (metadata.uploadMeta as UploadInfo | undefined));
+  const source =
+    hit.source ??
+    ((metadata.source as "psi-cache" | "regex" | undefined) ??
+      (uploadInfo ? "psi-cache" : "regex"));
 
   return {
     fqn: hit.fqn,
@@ -438,6 +456,7 @@ function describeHit(hit: SearchHit) {
     hierarchy,
     springInfo,
     uploadInfo,
+    source,
     metadata,
     location: {
       repoName,

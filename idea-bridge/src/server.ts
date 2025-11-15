@@ -2,8 +2,9 @@ import Fastify from "fastify";
 import path from "node:path";
 
 import { loadConfig } from "./config.js";
-import { buildSymbolRecords, SymbolIndex } from "./indexer.js";
-import { loadPsiCache, savePsiCache } from "./psiCache.js";
+import { SymbolIndex } from "./indexer.js";
+import { loadInitialSymbols } from "./psiDataSource.js";
+import { savePsiCache } from "./psiCache.js";
 import {
   appendUploadLog,
   ingestUploadBatch,
@@ -17,30 +18,9 @@ async function bootstrap() {
   const config = loadConfig();
   const fastify = Fastify({ logger: true });
 
-  let records: SymbolRecord[] = [];
-  let dataSource: "psi-cache" | "regex" = "regex";
-  const cached = await loadPsiCache(config.psiCachePath);
-  let dataSource: "psi-cache" | "regex" = "regex";
-
-  if (cached?.symbols?.length) {
-    fastify.log.info(
-      {
-        cachePath: config.psiCachePath,
-        schemaVersion: cached.schemaVersion,
-        symbolCount: cached.symbols.length,
-      },
-      "loaded PSI cache from previous export",
-    );
-    records = cached.symbols;
-    dataSource = "psi-cache";
-  } else {
-    fastify.log.info(
-      { projectRoot: config.projectRoot },
-      "building symbol index via regex fallback",
-    );
-    records = await buildSymbolRecords({ projectRoot: config.projectRoot });
-    dataSource = "regex";
-  }
+  const initialLoad = await loadInitialSymbols(config, fastify.log);
+  let records: SymbolRecord[] = initialLoad.records;
+  let dataSource: "psi-cache" | "regex" = initialLoad.source;
   let index = new SymbolIndex(records);
   const uploadLogPath = path.join(
     path.dirname(config.psiCachePath),
@@ -128,6 +108,7 @@ async function bootstrap() {
     const annotated = batchResult.combinedRecords.map((symbol) => ({
       ...symbol,
       uploadMeta: batchResult.uploadMeta,
+      source: "psi-cache" as const,
     }));
 
     replaceRecords(annotated);
@@ -164,10 +145,16 @@ async function bootstrap() {
       return { error: "query param is required" };
     }
 
-    const results = index.search({
+    const searchResults = index.search({
       query,
       limit: limit ? Number(limit) : undefined,
       module,
+    });
+    const results = searchResults.map((record) => {
+      const recordSource: "psi-cache" | "regex" = record.uploadMeta
+        ? "psi-cache"
+        : dataSource;
+      return { ...record, source: recordSource };
     });
 
     return {
@@ -175,6 +162,7 @@ async function bootstrap() {
       limit: limit ? Number(limit) : undefined,
       module,
       total: results.length,
+      dataSource,
       results,
     };
   });

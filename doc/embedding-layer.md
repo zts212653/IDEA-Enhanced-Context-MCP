@@ -398,6 +398,13 @@ Token消耗 → 约5000-8000 tokens
 
 ---
 
+## 实际 Milvus Schema（当前实现）
+
+- Collection: `idea_symbols`
+- Key fields: `id` (primary key), `index_level`, `repo_name`, `module_name`, `module_path`, `package_name`, `symbol_name`, `fqn`, `summary`, `metadata`, plus vector field `embedding`.
+- Metadata JSON中包含 `dependencies`, `spring`, `relations`, `quality`, `uploadMeta`（schema version / project / timestamps）。
+- 脚本：`npm run inspect-schema` 可打印当前集合字段与索引，并在 MCP 启动时通过 `ensureCollectionExists()` 自动校验。
+
 ## 🎯 推荐实施方案
 
 ### **Phase 1：MVP（现在）**

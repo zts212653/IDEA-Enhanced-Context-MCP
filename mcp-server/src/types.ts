@@ -39,6 +39,7 @@ export type SymbolRecord = {
   hierarchy?: HierarchyInfo;
   springInfo?: SpringInfo;
   uploadInfo?: UploadInfo;
+  source?: "psi-cache" | "regex";
   scoreHints?: {
     references?: number;
     lastModifiedDays?: number;

@@ -26,3 +26,4 @@ Bridge uploads read `IDEA_BRIDGE_URL`; the MCP server expects `MILVUS_ADDRESS`, 
 3. **Testing**: follow module-specific commands above; if a build can’t run in this environment (e.g., Gradle networking), note it explicitly.
 4. **Documentation**: after meaningful work, append the results to `AI_CHANGELOG.md` (with date + pass name) and mention any limitations for the next agent.
 5. **Coordination**: when uncertain or a refactor touches multiple modules, pause and ask the user before proceeding.
+6. **Backlog loop**: for each BACKLOG.md item—implement & self-test, update schemas/tools/docs as needed, tick the relevant checkbox in BACKLOG.md, and log the pass in AI_CHANGELOG.md.

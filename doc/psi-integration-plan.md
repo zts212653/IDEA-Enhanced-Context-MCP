@@ -25,7 +25,7 @@
 ### B. Bridge & Schema Updates
 1. ✅ Extend `SymbolRecord` (`idea-bridge/src/types.ts`) to store references, inheritance, spring info (done; relations placeholders still need real data).
 2. ✅ Persist latest PSI payload under `.idea-bridge/psi-cache.json` so server warm-starts from PSI instead of regex.
-3. Update `/api/psi/upload` to stream-ingest batches (backpressure, gzip) and emit audit logs. *(remaining)*
+3. `/api/psi/upload` now accepts chunked batches, annotates every record with `uploadMeta + source`, writes an `upload-log.ndjson`, and swaps the in-memory index + `.idea-bridge/psi-cache.json` atomically once the final batch arrives. *(next: gzip/backpressure)*
 
 ### C. Embedding & Search Pipeline
 1. Refresh `symbolToEmbeddingText` and `ingest:milvus` to include new metadata, maintain repo/module/class/method levels, and calculate smarter summaries (method roles, dependency counts).

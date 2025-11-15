@@ -106,6 +106,7 @@ export interface SymbolRecord {
   dependencies: DependencyInfo;
   springInfo?: SpringInfo;
   uploadMeta?: UploadMetadata;
+  source?: "psi-cache" | "regex";
   hierarchy?: HierarchyInfo;
   relations?: RelationInfo;
   quality: QualityMetrics;

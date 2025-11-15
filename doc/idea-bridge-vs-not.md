@@ -486,4 +486,6 @@ embedding = embed_model.encode(enhanced_text)
 
 对于你们上万Java仓库的规模，IDEA Bridge带来的价值是**指数级**的！
 
+> **当前阶段提示**：当 `.idea-bridge/psi-cache.json` 不存在时，Bridge 仍会临时回退到 regex index，这在 `/api/info` / MCP `health_check` 里会以 `dataSource: "regex"` 暴露。目标阶段是让 IDE 插件持续推送 PSI，从而彻底切换为 `psi-cache` 模式。
+
 需要我给你画个架构图，展示数据流向和存储结构吗？

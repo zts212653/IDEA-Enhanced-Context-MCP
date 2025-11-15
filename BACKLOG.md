@@ -36,29 +36,29 @@
 
 ### A.1 MCP `health_check` 强化
 
-- [ ] 扩展 `health_check` 返回结构：
-  - [ ] `bridge.status`：可连接 / 不可连接，延迟，最近错误。
-  - [ ] `milvus.status`：可连接 / 不可连接，集合是否存在，向量维度 / indexLevel 字段是否匹配预期。
-  - [ ] `psiCache.status`：缓存文件存在与否、记录条数、最近更新时间。
-- [ ] 在 MCP 日志中规范化 health log（统一前缀，例如 `[health]`），方便 CLI / 其他 Agent 抓取。
-- [ ] 文档：在 `doc/idea-enhanced-context-design.md` 中补一节「Health & Observability」。
+- [x] 扩展 `health_check` 返回结构：
+  - [x] `bridge.status`：可连接 / 不可连接，延迟，最近错误。
+  - [x] `milvus.status`：可连接 / 不可连接，集合是否存在，向量维度 / indexLevel 字段是否匹配预期。
+  - [x] `psiCache.status`：缓存文件存在与否、记录条数、最近更新时间。
+- [x] 在 MCP 日志中规范化 health log（统一前缀，例如 `[health]`），方便 CLI / 其他 Agent 抓取。
+- [x] 文档：在 `doc/idea-enhanced-context-design.md` 中补一节「Health & Observability」。
 
 ### A.2 Milvus 集合与 Schema 固化
 
-- [ ] 在 `mcp-server/src/vectordb/` 下加一份 `schema.ts`：
-  - [ ] 清晰定义 collection 名称、向量字段名、`indexLevel` / `module` / `repoName` / `filePath` 等字段。
-  - [ ] 提供 `ensureCollectionExists()`，在启动时检查并打印清晰日志，而不是在第一次查询时隐式崩溃。
-- [ ] 添加一个 `npm script`：`npm run inspect-schema`，打印当前集合 schema，方便调试。
-- [ ] 文档：在 `doc/embedding-layer.md` 中加入「实际 Schema vs 设计 Schema 对照」小节。
+- [x] 在 `mcp-server/src/vectordb/` 下加一份 `schema.ts`：
+  - [x] 清晰定义 collection 名称、向量字段名、`indexLevel` / `module` / `repoName` / `filePath` 等字段。
+  - [x] 提供 `ensureCollectionExists()`，在启动时检查并打印清晰日志，而不是在第一次查询时隐式崩溃。
+- [x] 添加一个 `npm script`：`npm run inspect-schema`，打印当前集合 schema，方便调试。
+- [x] 文档：在 `doc/embedding-layer.md` 中加入「实际 Schema vs 设计 Schema 对照」小节。
 
 ### A.3 PSI Cache 加载与回退逻辑
 
-- [ ] 把当前「启动时加载 `.idea-bridge/psi-cache.json`，无缓存时退回 regex index」的逻辑显式整理成一个模块：
-  - [ ] `psiCache.loadOrFallback()`：返回当前使用的数据源（cache / regex）。
-  - [ ] 在 `health_check` 和 `search_java_class` 返回体里，附上 `source: "psi-cache" | "regex"`。
-- [ ] 更新 `doc/idea-bridge-vs-not.md`：
-  - [ ] 标记当前阶段仍会在「缓存缺失」时使用 regex fallback。
-  - [ ] 写明未来阶段「IDEA Bridge-only 模式」的目标条件（例如：缓存覆盖率 > 95%，IDEA 插件支持增量推送）。
+- [x] 把当前「启动时加载 `.idea-bridge/psi-cache.json`，无缓存时退回 regex index」的逻辑显式整理成一个模块：
+  - [x] `psiCache.loadOrFallback()`：返回当前使用的数据源（cache / regex）。
+  - [x] 在 `health_check` 和 `search_java_class` 返回体里，附上 `source: "psi-cache" | "regex"`。
+- [x] 更新 `doc/idea-bridge-vs-not.md`：
+  - [x] 标记当前阶段仍会在「缓存缺失」时使用 regex fallback。
+  - [x] 写明未来阶段「IDEA Bridge-only 模式」的目标条件（例如：缓存覆盖率 > 95%，IDEA 插件支持增量推送）。
 
 ---
 

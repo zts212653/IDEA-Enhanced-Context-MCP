@@ -19,19 +19,23 @@ echo "==> (2/4) Ingesting sample repo into Milvus"
   npm run ingest:milvus
 )
 
-echo "==> (3/4) Running MCP search sanity check"
-node <<'NODE'
-const { createSearchPipeline } = require("../mcp-server/dist/searchPipeline.js");
-const { createMilvusSearchClient } = require("../mcp-server/dist/milvusClient.js");
-(async () => {
-  const pipeline = createSearchPipeline({
-    bridgeClient: undefined,
-    milvusClient: createMilvusSearchClient(),
-    fallbackSymbols: [],
-  });
-  const outcome = await pipeline.search({ query: "service", limit: 5 });
-  console.log(JSON.stringify(outcome, null, 2));
-})();
+echo "==> (3/4) Building MCP server & running search sanity check"
+(
+  cd "$MCP_SERVER"
+  npm run build
+)
+# Some sandboxes block Node gRPC → skip schema ensure and rely on Python bridge.
+DISABLE_SCHEMA_CHECK=1 node --input-type=module <<'NODE'
+import { createSearchPipeline } from "./mcp-server/dist/searchPipeline.js";
+import { createMilvusSearchClient } from "./mcp-server/dist/milvusClient.js";
+
+const pipeline = createSearchPipeline({
+  bridgeClient: undefined,
+  milvusClient: createMilvusSearchClient(),
+  fallbackSymbols: [],
+});
+const outcome = await pipeline.search({ query: "service", limit: 5 });
+console.log(JSON.stringify(outcome, null, 2));
 NODE
 
 echo "==> (4/4) Completed end-to-end verification"
