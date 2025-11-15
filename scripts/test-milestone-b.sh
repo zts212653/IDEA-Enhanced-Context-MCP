@@ -23,6 +23,14 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
+# curl/nc are used for env validation
+for tool in curl nc; do
+    if ! command -v "$tool" > /dev/null 2>&1; then
+        echo "❌ ERROR: $tool is required but not installed"
+        exit 1
+    fi
+done
+
 # Check if Python venv is activated
 if [ -z "$VIRTUAL_ENV" ]; then
     echo "⚠️  WARNING: Python venv not detected. Trying to activate..."
@@ -38,6 +46,8 @@ fi
 # Set common env vars
 export DISABLE_SCHEMA_CHECK=1
 export NODE_OPTIONS="--no-warnings"
+export IDEA_BRIDGE_URL="${IDEA_BRIDGE_URL:-http://127.0.0.1:63000}"
+export MILVUS_ADDRESS="${MILVUS_ADDRESS:-127.0.0.1:19530}"
 
 TEST_OUTPUT_DIR="/tmp/milestone-b-tests"
 mkdir -p "$TEST_OUTPUT_DIR"
@@ -45,6 +55,44 @@ mkdir -p "$TEST_OUTPUT_DIR"
 PASSED=0
 FAILED=0
 TOTAL=0
+
+check_bridge() {
+    local url="$IDEA_BRIDGE_URL"
+    echo "→ Checking IDEA Bridge at $url"
+    if ! curl -fsS "$url/healthz" >/dev/null 2>&1; then
+        echo "❌ ERROR: IDEA Bridge not reachable at $url"
+        echo "   Start it via: (cd idea-bridge && npm run dev)"
+        exit 1
+    fi
+}
+
+check_milvus() {
+    local address="$MILVUS_ADDRESS"
+    local host="${address%:*}"
+    local port="${address##*:}"
+    if [ "$address" = "$host" ]; then
+        port="19530"
+    fi
+    echo "→ Checking Milvus at $host:$port"
+    if ! nc -z "$host" "$port" >/dev/null 2>&1; then
+        echo "❌ ERROR: Milvus not reachable at $host:$port"
+        echo "   Start it with docker compose or set MILVUS_ADDRESS accordingly"
+        exit 1
+    fi
+}
+
+check_psi_cache() {
+    local cache=".idea-bridge/psi-cache.json"
+    if [ ! -f "$cache" ]; then
+        echo "⚠️  WARNING: $cache not found. Ensure PSI export + ingest were run"
+    fi
+}
+
+echo "Section 0: Environment checks"
+echo "─────────────────────────────────────────────────────────────────"
+check_bridge
+check_milvus
+check_psi_cache
 
 # Helper function to run a test
 run_test() {
