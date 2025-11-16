@@ -27,14 +27,36 @@ export async function generateEmbedding(
 }
 
 export function symbolToEmbeddingText(symbol: SymbolRecord): string {
+  const typeInfo = symbol.typeInfo ?? {
+    visibility: "package-private",
+    isAbstract: false,
+    isFinal: false,
+    isInterface: false,
+    modifiers: [],
+  };
+  const annotations = symbol.annotations ?? [];
+  const fields = symbol.fields ?? [];
+  const methods = symbol.methods ?? [];
+  const relations = symbol.relations ?? {
+    calls: [],
+    calledBy: [],
+    references: [],
+  };
+  const quality = symbol.quality ?? {
+    hasJavadoc: Boolean(symbol.javadoc),
+    methodCount: methods.length,
+    fieldCount: fields.length,
+    annotationCount: annotations.length,
+  };
+
   const lines = [
     `Repository: ${symbol.repoName}`,
     `Module: ${symbol.module} (${symbol.modulePath})`,
     `Symbol: ${symbol.fqn}`,
     `Kind: ${symbol.kind}`,
-    `Visibility: ${symbol.typeInfo.visibility}`,
-    `Type traits: interface=${symbol.typeInfo.isInterface}, abstract=${symbol.typeInfo.isAbstract}, final=${symbol.typeInfo.isFinal}`,
-    `Modifiers: ${symbol.typeInfo.modifiers.join(" ") || "none"}`,
+    `Visibility: ${typeInfo.visibility}`,
+    `Type traits: interface=${typeInfo.isInterface}, abstract=${typeInfo.isAbstract}, final=${typeInfo.isFinal}`,
+    `Modifiers: ${typeInfo.modifiers.join(" ") || "none"}`,
     `Package: ${symbol.packageName}`,
     `Summary: ${symbol.summary}`,
   ];
@@ -43,11 +65,9 @@ export function symbolToEmbeddingText(symbol: SymbolRecord): string {
     lines.push(`Javadoc: ${symbol.javadoc}`);
   }
 
-  if (symbol.annotations.length > 0) {
+  if (annotations.length > 0) {
     lines.push(
-      `Annotations: ${symbol.annotations
-        .map((ann) => ann.fqn ?? ann.name)
-        .join(", ")}`,
+      `Annotations: ${annotations.map((ann) => ann.fqn ?? ann.name).join(", ")}`,
     );
   }
 
@@ -65,9 +85,9 @@ export function symbolToEmbeddingText(symbol: SymbolRecord): string {
     );
   }
 
-  if (symbol.fields.length > 0) {
+  if (fields.length > 0) {
     lines.push("Fields:");
-    for (const field of symbol.fields.slice(0, 10)) {
+    for (const field of fields.slice(0, 10)) {
       lines.push(
         `- ${field.type} ${field.name} (${field.annotations
           .map((ann) => ann.name)
@@ -76,9 +96,9 @@ export function symbolToEmbeddingText(symbol: SymbolRecord): string {
     }
   }
 
-  if (symbol.methods.length > 0) {
+  if (methods.length > 0) {
     lines.push("Key methods:");
-    for (const method of symbol.methods.slice(0, 10)) {
+    for (const method of methods.slice(0, 10)) {
       lines.push(
         `- ${method.signature} :: returns ${
           method.returnTypeFqn ?? method.returnType
@@ -87,22 +107,14 @@ export function symbolToEmbeddingText(symbol: SymbolRecord): string {
     }
   }
 
-  if (symbol.relations) {
-    if (symbol.relations.calls.length > 0) {
-      lines.push(
-        `Calls: ${symbol.relations.calls.slice(0, 10).join(", ")}`,
-      );
-    }
-    if (symbol.relations.calledBy.length > 0) {
-      lines.push(
-        `Called by: ${symbol.relations.calledBy.slice(0, 10).join(", ")}`,
-      );
-    }
-    if (symbol.relations.references.length > 0) {
-      lines.push(
-        `References: ${symbol.relations.references.slice(0, 10).join(", ")}`,
-      );
-    }
+  if (relations.calls.length > 0) {
+    lines.push(`Calls: ${relations.calls.slice(0, 10).join(", ")}`);
+  }
+  if (relations.calledBy.length > 0) {
+    lines.push(`Called by: ${relations.calledBy.slice(0, 10).join(", ")}`);
+  }
+  if (relations.references.length > 0) {
+    lines.push(`References: ${relations.references.slice(0, 10).join(", ")}`);
   }
 
   if (symbol.springInfo?.isSpringBean) {
@@ -119,7 +131,7 @@ export function symbolToEmbeddingText(symbol: SymbolRecord): string {
   }
 
   lines.push(
-    `Quality: methods=${symbol.quality.methodCount}, fields=${symbol.quality.fieldCount}, annotations=${symbol.quality.annotationCount}, hasJavadoc=${symbol.quality.hasJavadoc}`,
+    `Quality: methods=${quality.methodCount}, fields=${quality.fieldCount}, annotations=${quality.annotationCount}, hasJavadoc=${quality.hasJavadoc}`,
   );
 
   lines.push(`Source: ${symbol.relativePath}`);
