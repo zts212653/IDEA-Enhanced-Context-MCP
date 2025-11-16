@@ -27,9 +27,14 @@ export function loadConfig(): BridgeConfig {
     process.env.BRIDGE_PROJECT_ROOT ??
     path.join(os.homedir(), "projects", "spring-petclinic-microservices");
 
+  const defaultCachePath = path.join(
+    process.cwd(),
+    ".idea-bridge",
+    "psi-cache.json",
+  );
+
   const psiCachePath =
-    process.env.BRIDGE_PSI_CACHE ??
-    path.join(projectRoot, ".idea-bridge", "psi-cache.json");
+    process.env.BRIDGE_PSI_CACHE ?? defaultCachePath;
 
   return {
     projectRoot: resolveTilde(projectRoot),

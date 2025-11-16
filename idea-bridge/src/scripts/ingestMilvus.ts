@@ -10,7 +10,7 @@ import {
   generateEmbedding,
   symbolToEmbeddingText,
 } from "../embedding.js";
-import { buildSymbolRecords } from "../indexer.js";
+import { loadInitialSymbols } from "../psiDataSource.js";
 import type { MethodInfo, SymbolRecord } from "../types.js";
 
 type IndexLevel = "repository" | "module" | "class" | "method";
@@ -297,8 +297,15 @@ function prepareRow(
 
 async function run() {
   const config = loadConfig();
-  console.log("Building symbols from project:", config.projectRoot);
-  const records = await buildSymbolRecords({ projectRoot: config.projectRoot });
+  const initial = await loadInitialSymbols(config);
+  const records = initial.records;
+  if (initial.source === "psi-cache") {
+    console.log(
+      `Loaded ${records.length} symbols from PSI cache: ${config.psiCachePath}`,
+    );
+  } else {
+    console.log("Building symbols from project:", config.projectRoot);
+  }
   if (records.length === 0) {
     throw new Error("No symbols found to ingest");
   }
