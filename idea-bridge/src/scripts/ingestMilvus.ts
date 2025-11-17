@@ -298,7 +298,16 @@ function prepareRow(
 async function run() {
   const config = loadConfig();
   const initial = await loadInitialSymbols(config);
-  const records = initial.records;
+  let records = initial.records;
+  const ingestLimit = process.env.INGEST_LIMIT
+    ? Number(process.env.INGEST_LIMIT)
+    : undefined;
+  if (ingestLimit && Number.isFinite(ingestLimit) && ingestLimit > 0) {
+    records = records.slice(0, ingestLimit);
+    console.log(
+      `INGEST_LIMIT set to ${ingestLimit}, truncating records to ${records.length}.`,
+    );
+  }
   if (initial.source === "psi-cache") {
     console.log(
       `Loaded ${records.length} symbols from PSI cache: ${config.psiCachePath}`,
@@ -347,9 +356,8 @@ async function run() {
       if (embedding.length > dimension) {
         dimension = embedding.length;
         resizeExistingRows(dimension);
-      } else {
-        embedding = adjustVectorLength(embedding, dimension);
       }
+      embedding = adjustVectorLength(embedding, dimension);
     }
 
     embeddedRows.push(prepareRow(entry, embedding, config.milvusVectorField));
@@ -366,6 +374,21 @@ async function run() {
 
   if (!finalDimension) {
     throw new Error("Unable to determine embedding dimension");
+  }
+
+  const hist = new Map<number, number>();
+  for (const row of embeddedRows) {
+    const vec = row[config.milvusVectorField];
+    if (Array.isArray(vec)) {
+      const len = vec.length;
+      hist.set(len, (hist.get(len) ?? 0) + 1);
+      if (len !== finalDimension) {
+        row[config.milvusVectorField] = adjustVectorLength(vec, finalDimension);
+      }
+    }
+  }
+  if (hist.size > 1) {
+    console.warn("[idea-bridge] vector length histogram", Object.fromEntries(hist));
   }
 
   const payload = {
