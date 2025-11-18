@@ -448,7 +448,13 @@ async function run() {
     `[idea-bridge] Ingesting ${embeddedRows.length} rows in chunks of ${chunkSize} (dim=${finalDimension})...`,
   );
   for (let start = 0; start < embeddedRows.length; start += chunkSize) {
+    const chunkIndex = Math.floor(start / chunkSize) + 1;
+    const totalChunks = Math.ceil(embeddedRows.length / chunkSize);
     const rows = embeddedRows.slice(start, start + chunkSize);
+    const end = start + rows.length;
+    console.log(
+      `[idea-bridge] chunk ${chunkIndex}/${totalChunks} rows ${start}-${end} (reset=${config.resetMilvusCollection && start === 0})`,
+    );
     const payload = {
       collectionName: config.milvusCollection,
       vectorField: config.milvusVectorField,
@@ -472,6 +478,9 @@ async function run() {
       proc.on("error", (error) => reject(error));
     });
     inserted += rows.length;
+    console.log(
+      `[idea-bridge] inserted so far: ${inserted}/${embeddedRows.length}`,
+    );
   }
 
   await fs.rm(tmpDir, { recursive: true, force: true });
