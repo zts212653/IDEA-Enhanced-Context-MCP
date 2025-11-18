@@ -82,14 +82,15 @@ check_milvus() {
 }
 
 check_psi_cache() {
-  local cache=".idea-bridge/psi-cache.json"
+  local cache="${BRIDGE_PSI_CACHE:-.idea-bridge/psi-cache.json}"
   if [ ! -f "$cache" ]; then
     if [ "${ALLOW_MISSING_PSI_CACHE:-0}" = "1" ]; then
       echo "⚠️  WARNING: $cache not found; continuing because ALLOW_MISSING_PSI_CACHE=1"
       return
     fi
-    echo "❌ ERROR: $cache not found."
+    echo "❌ ERROR: $cache not found at $cache."
     echo "   请先在 IDEA 中运行插件导出 PSI，并执行 'npm run ingest:milvus' 将数据写入 Milvus。"
+    echo "   如已放置在自定义路径，请设置 BRIDGE_PSI_CACHE 环境变量后重试。"
     exit 1
   fi
 }

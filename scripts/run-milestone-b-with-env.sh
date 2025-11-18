@@ -53,9 +53,12 @@ for i in {1..20}; do
   fi
   
 done
-
 SECTION "运行 Milestone B 测试"
 export IDEA_BRIDGE_URL="${BRIDGE_URL}"
 export MILVUS_ADDRESS="${MILVUS_ADDRESS:-127.0.0.1:19530}"
+# 让测试脚本尊重自定义 PSI cache 路径
+if [[ -n "${BRIDGE_PSI_CACHE:-}" ]]; then
+  export BRIDGE_PSI_CACHE
+fi
 chmod +x "${ROOT}/scripts/test-milestone-b.sh"
 "${ROOT}/scripts/test-milestone-b.sh"
