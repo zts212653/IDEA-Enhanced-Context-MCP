@@ -51,6 +51,12 @@ function truncateArray<T>(values: T[], limit = 10) {
   return values.length > limit ? values.slice(0, limit) : values;
 }
 
+function vectorNorm(vec: number[]): number {
+  let sum = 0;
+  for (const v of vec) sum += v * v;
+  return Math.sqrt(sum);
+}
+
 function buildIndexEntries(records: SymbolRecord[]): IndexEntry[] {
   if (records.length === 0) return [];
 
@@ -358,6 +364,12 @@ async function run() {
         resizeExistingRows(dimension);
       }
       embedding = adjustVectorLength(embedding, dimension);
+    }
+
+    // Skip zero-norm vectors to avoid polluting Milvus with unusable rows
+    if (vectorNorm(embedding) === 0) {
+      console.warn(`Skipping zero-norm embedding for ${entry.id}`);
+      continue;
     }
 
     embeddedRows.push(prepareRow(entry, embedding, config.milvusVectorField));
