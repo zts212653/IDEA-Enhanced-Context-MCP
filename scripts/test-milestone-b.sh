@@ -50,7 +50,7 @@ export NODE_OPTIONS="--no-warnings"
 export IDEA_BRIDGE_URL="${IDEA_BRIDGE_URL:-http://127.0.0.1:63000}"
 export MILVUS_ADDRESS="${MILVUS_ADDRESS:-127.0.0.1:19530}"
 
-TEST_OUTPUT_DIR="/tmp/milestone-b-tests"
+TEST_OUTPUT_DIR="${ROOT}/tmp/milestone-b-tests"
 mkdir -p "$TEST_OUTPUT_DIR"
 
 PASSED=0
@@ -242,12 +242,12 @@ echo "────────────────────────�
 
 run_test \
     "Dynamic Top-K: Targeted Query" \
-    "cd mcp-server && PREFERRED_LEVELS=class MAX_CONTEXT_TOKENS=8000 npm run tool:search -- 'VisitController'" \
+    "cd ${ROOT}/mcp-server && PREFERRED_LEVELS=class MAX_CONTEXT_TOKENS=8000 npm run tool:search -- 'VisitController'" \
     "validate_targeted_strategy"
 
 run_test \
     "Dynamic Top-K: Deep Query" \
-    "cd mcp-server && PREFERRED_LEVELS=module,class,method MAX_CONTEXT_TOKENS=8000 npm run tool:search -- 'If I change the Visit entity schema, what controllers, repositories, and DTOs will be affected?'" \
+    "cd ${ROOT}/mcp-server && PREFERRED_LEVELS=module,class,method MAX_CONTEXT_TOKENS=8000 npm run tool:search -- 'If I change the Visit entity schema, what controllers, repositories, and DTOs will be affected?'" \
     "validate_deep_strategy"
 
 echo ""
@@ -256,7 +256,7 @@ echo "────────────────────────�
 
 run_test \
     "Context Budget: Token Limit Enforcement" \
-    "cd mcp-server && MAX_CONTEXT_TOKENS=2000 npm run tool:search -- 'Spring beans'" \
+    "cd ${ROOT}/mcp-server && MAX_CONTEXT_TOKENS=2000 npm run tool:search -- 'Spring beans'" \
     "validate_context_budget"
 
 echo ""
@@ -265,7 +265,7 @@ echo "────────────────────────�
 
 run_test \
     "Module Hint: Results Prioritization" \
-    "cd mcp-server && PREFERRED_LEVELS=class MODULE_HINT=spring-petclinic-visits-service npm run tool:search -- 'REST API'" \
+    "cd ${ROOT}/mcp-server && PREFERRED_LEVELS=class MODULE_HINT=spring-petclinic-visits-service npm run tool:search -- 'REST API'" \
     "validate_module_hint"
 
 echo ""
@@ -274,12 +274,12 @@ echo "────────────────────────�
 
 run_test \
     "Fallback: Visit Impact Synthesis" \
-    "cd mcp-server && DISABLE_MILVUS=1 npm run tool:search -- 'Visit entity impact analysis'" \
+    "cd ${ROOT}/mcp-server && DISABLE_MILVUS=1 npm run tool:search -- 'Visit entity impact analysis'" \
     "validate_fallback"
 
 run_test \
     "Fallback: Spring Beans Breadth Mode" \
-    "cd mcp-server && MAX_CONTEXT_TOKENS=4000 npm run tool:search -- 'Show me all Spring beans in the entire project'" \
+    "cd ${ROOT}/mcp-server && MAX_CONTEXT_TOKENS=4000 npm run tool:search -- 'Show me all Spring beans in the entire project'" \
     "validate_breadth_mode"
 
 # ===================================================================
