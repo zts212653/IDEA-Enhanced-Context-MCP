@@ -141,9 +141,14 @@ object SymbolBuilder {
                 typeFqn = it.type.canonicalText,
             )
         }
+        val signature = method.text
+            ?.substringBefore('{')
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: buildFallbackSignature(method, parameters)
         return MethodInfo(
             name = method.name,
-            signature = method.text.substringBefore('{').trim(),
+            signature = signature,
             visibility = methodVisibility(method),
             returnType = method.returnType?.presentableText ?: "void",
             returnTypeFqn = method.returnType?.canonicalText,
@@ -166,6 +171,12 @@ object SymbolBuilder {
                 ?: emptyList(),
             annotations = field.annotations.map(::annotationInfo),
         )
+}
+
+private fun buildFallbackSignature(method: PsiMethod, parameters: List<ParameterInfo>): String {
+    val params = parameters.joinToString(", ") { it.type ?: it.typeFqn ?: "Object" }
+    val returnType = method.returnType?.presentableText ?: "void"
+    return "$returnType ${method.name}($params)"
 }
 
 class BridgeUploader(

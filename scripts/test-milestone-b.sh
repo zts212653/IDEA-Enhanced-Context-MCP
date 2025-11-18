@@ -15,6 +15,7 @@ echo ""
 
 # Ensure we're in the repo root
 cd "$(dirname "$0")/.."
+ROOT="$(pwd)"
 
 # Check prerequisites
 if ! command -v jq &> /dev/null; then
@@ -22,6 +23,14 @@ if ! command -v jq &> /dev/null; then
     echo "   Install with: brew install jq (macOS) or apt-get install jq (Linux)"
     exit 1
 fi
+
+# curl/nc are used for env validation
+for tool in curl nc; do
+    if ! command -v "$tool" > /dev/null 2>&1; then
+        echo "❌ ERROR: $tool is required but not installed"
+        exit 1
+    fi
+done
 
 # Check if Python venv is activated
 if [ -z "$VIRTUAL_ENV" ]; then
@@ -38,13 +47,61 @@ fi
 # Set common env vars
 export DISABLE_SCHEMA_CHECK=1
 export NODE_OPTIONS="--no-warnings"
+export IDEA_BRIDGE_URL="${IDEA_BRIDGE_URL:-http://127.0.0.1:63000}"
+export MILVUS_ADDRESS="${MILVUS_ADDRESS:-127.0.0.1:19530}"
 
-TEST_OUTPUT_DIR="/tmp/milestone-b-tests"
+TEST_OUTPUT_DIR="${ROOT}/tmp/milestone-b-tests"
 mkdir -p "$TEST_OUTPUT_DIR"
 
 PASSED=0
 FAILED=0
 TOTAL=0
+
+check_bridge() {
+    local url="$IDEA_BRIDGE_URL"
+    echo "→ Checking IDEA Bridge at $url"
+    if ! curl -fsS "$url/healthz" >/dev/null 2>&1; then
+        echo "❌ ERROR: IDEA Bridge not reachable at $url"
+        echo "   Start it via: (cd idea-bridge && npm run dev)"
+        exit 1
+    fi
+}
+
+check_milvus() {
+    local address="$MILVUS_ADDRESS"
+    local host="${address%:*}"
+    local port="${address##*:}"
+    if [ "$address" = "$host" ]; then
+        port="19530"
+    fi
+    echo "→ Checking Milvus at $host:$port"
+    if ! nc -z "$host" "$port" >/dev/null 2>&1; then
+        echo "❌ ERROR: Milvus not reachable at $host:$port"
+        echo "   Start it with docker compose or set MILVUS_ADDRESS accordingly"
+        exit 1
+    fi
+}
+
+check_psi_cache() {
+  local default_cache="${ROOT}/idea-bridge/.idea-bridge/psi-cache.json"
+  local cache="${BRIDGE_PSI_CACHE:-$default_cache}"
+  if [ ! -f "$cache" ]; then
+    if [ "${ALLOW_MISSING_PSI_CACHE:-0}" = "1" ]; then
+      echo "⚠️  WARNING: $cache not found; continuing because ALLOW_MISSING_PSI_CACHE=1"
+      return
+    fi
+    echo "❌ ERROR: $cache not found at $cache."
+    echo "   请先在 IDEA 中运行插件导出 PSI，并执行 'npm run ingest:milvus' 将数据写入 Milvus。"
+    echo "   如已放置在自定义路径，请设置 BRIDGE_PSI_CACHE 环境变量后重试。"
+    exit 1
+  fi
+}
+
+echo "Section 0: Environment checks"
+echo "─────────────────────────────────────────────────────────────────"
+check_bridge
+check_milvus
+check_psi_cache
 
 # Helper function to run a test
 run_test() {
@@ -185,12 +242,12 @@ echo "────────────────────────�
 
 run_test \
     "Dynamic Top-K: Targeted Query" \
-    "cd mcp-server && PREFERRED_LEVELS=class MAX_CONTEXT_TOKENS=8000 npm run tool:search -- 'VisitController'" \
+    "cd ${ROOT}/mcp-server && PREFERRED_LEVELS=class MAX_CONTEXT_TOKENS=8000 npm run tool:search -- 'VisitController'" \
     "validate_targeted_strategy"
 
 run_test \
     "Dynamic Top-K: Deep Query" \
-    "cd mcp-server && PREFERRED_LEVELS=module,class,method MAX_CONTEXT_TOKENS=8000 npm run tool:search -- 'If I change the Visit entity schema, what controllers, repositories, and DTOs will be affected?'" \
+    "cd ${ROOT}/mcp-server && PREFERRED_LEVELS=module,class,method MAX_CONTEXT_TOKENS=8000 npm run tool:search -- 'If I change the Visit entity schema, what controllers, repositories, and DTOs will be affected?'" \
     "validate_deep_strategy"
 
 echo ""
@@ -199,7 +256,7 @@ echo "────────────────────────�
 
 run_test \
     "Context Budget: Token Limit Enforcement" \
-    "cd mcp-server && MAX_CONTEXT_TOKENS=2000 npm run tool:search -- 'Spring beans'" \
+    "cd ${ROOT}/mcp-server && MAX_CONTEXT_TOKENS=2000 npm run tool:search -- 'Spring beans'" \
     "validate_context_budget"
 
 echo ""
@@ -208,7 +265,7 @@ echo "────────────────────────�
 
 run_test \
     "Module Hint: Results Prioritization" \
-    "cd mcp-server && PREFERRED_LEVELS=class MODULE_HINT=spring-petclinic-visits-service npm run tool:search -- 'REST API'" \
+    "cd ${ROOT}/mcp-server && PREFERRED_LEVELS=class MODULE_HINT=spring-petclinic-visits-service npm run tool:search -- 'REST API'" \
     "validate_module_hint"
 
 echo ""
@@ -217,12 +274,12 @@ echo "────────────────────────�
 
 run_test \
     "Fallback: Visit Impact Synthesis" \
-    "cd mcp-server && DISABLE_MILVUS=1 npm run tool:search -- 'Visit entity impact analysis'" \
+    "cd ${ROOT}/mcp-server && DISABLE_MILVUS=1 npm run tool:search -- 'Visit entity impact analysis'" \
     "validate_fallback"
 
 run_test \
     "Fallback: Spring Beans Breadth Mode" \
-    "cd mcp-server && MAX_CONTEXT_TOKENS=4000 npm run tool:search -- 'Show me all Spring beans in the entire project'" \
+    "cd ${ROOT}/mcp-server && MAX_CONTEXT_TOKENS=4000 npm run tool:search -- 'Show me all Spring beans in the entire project'" \
     "validate_breadth_mode"
 
 # ===================================================================

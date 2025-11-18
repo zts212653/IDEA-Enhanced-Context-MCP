@@ -15,6 +15,7 @@ venv/
 # Runtime artifacts
 *.log
 tmp/
+.idea-bridge/
 .idea-enhanced-context/milvus/volumes/*
 
 # Gradle / IntelliJ plugin artifacts

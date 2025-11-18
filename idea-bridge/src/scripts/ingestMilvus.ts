@@ -10,7 +10,7 @@ import {
   generateEmbedding,
   symbolToEmbeddingText,
 } from "../embedding.js";
-import { buildSymbolRecords } from "../indexer.js";
+import { loadInitialSymbols } from "../psiDataSource.js";
 import type { MethodInfo, SymbolRecord } from "../types.js";
 
 type IndexLevel = "repository" | "module" | "class" | "method";
@@ -49,6 +49,12 @@ function adjustVectorLength(vector: number[], dimension: number): number[] {
 
 function truncateArray<T>(values: T[], limit = 10) {
   return values.length > limit ? values.slice(0, limit) : values;
+}
+
+function vectorNorm(vec: number[]): number {
+  let sum = 0;
+  for (const v of vec) sum += v * v;
+  return Math.sqrt(sum);
 }
 
 function buildIndexEntries(records: SymbolRecord[]): IndexEntry[] {
@@ -297,8 +303,24 @@ function prepareRow(
 
 async function run() {
   const config = loadConfig();
-  console.log("Building symbols from project:", config.projectRoot);
-  const records = await buildSymbolRecords({ projectRoot: config.projectRoot });
+  const initial = await loadInitialSymbols(config);
+  let records = initial.records;
+  const ingestLimit = process.env.INGEST_LIMIT
+    ? Number(process.env.INGEST_LIMIT)
+    : undefined;
+  if (ingestLimit && Number.isFinite(ingestLimit) && ingestLimit > 0) {
+    records = records.slice(0, ingestLimit);
+    console.log(
+      `INGEST_LIMIT set to ${ingestLimit}, truncating records to ${records.length}.`,
+    );
+  }
+  if (initial.source === "psi-cache") {
+    console.log(
+      `Loaded ${records.length} symbols from PSI cache: ${config.psiCachePath}`,
+    );
+  } else {
+    console.log("Building symbols from project:", config.projectRoot);
+  }
   if (records.length === 0) {
     throw new Error("No symbols found to ingest");
   }
@@ -340,9 +362,14 @@ async function run() {
       if (embedding.length > dimension) {
         dimension = embedding.length;
         resizeExistingRows(dimension);
-      } else {
-        embedding = adjustVectorLength(embedding, dimension);
       }
+      embedding = adjustVectorLength(embedding, dimension);
+    }
+
+    // Skip zero-norm vectors to avoid polluting Milvus with unusable rows
+    if (vectorNorm(embedding) === 0) {
+      console.warn(`Skipping zero-norm embedding for ${entry.id}`);
+      continue;
     }
 
     embeddedRows.push(prepareRow(entry, embedding, config.milvusVectorField));
@@ -361,26 +388,39 @@ async function run() {
     throw new Error("Unable to determine embedding dimension");
   }
 
-  const payload = {
-    collectionName: config.milvusCollection,
-    vectorField: config.milvusVectorField,
-    dimension: finalDimension,
-    reset: config.resetMilvusCollection,
-    milvusAddress: config.milvusGrpcAddress,
-    milvusDatabase: config.milvusDatabase,
-    rows: embeddedRows,
-  };
+  const hist = new Map<number, number>();
+  for (const row of embeddedRows) {
+    const vec = row[config.milvusVectorField];
+    if (Array.isArray(vec)) {
+      const len = vec.length;
+      hist.set(len, (hist.get(len) ?? 0) + 1);
+      if (len !== finalDimension) {
+        row[config.milvusVectorField] = adjustVectorLength(vec, finalDimension);
+      }
+    }
+  }
+  if (hist.size > 1) {
+    console.warn("[idea-bridge] vector length histogram", Object.fromEntries(hist));
+  }
 
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "idea-bridge-"));
-  const jsonPath = path.join(tmpDir, "symbols.json");
-  await fs.writeFile(jsonPath, JSON.stringify(payload));
-
   const scriptPath = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     "../../scripts/milvus_ingest.py",
   );
 
   if (process.env.DISABLE_MILVUS === "1" || process.env.MILVUS_DRY_RUN === "1") {
+    const payload = {
+      collectionName: config.milvusCollection,
+      vectorField: config.milvusVectorField,
+      dimension: finalDimension,
+      reset: config.resetMilvusCollection,
+      milvusAddress: config.milvusGrpcAddress,
+      milvusDatabase: config.milvusDatabase,
+      rows: embeddedRows,
+    };
+    const jsonPath = path.join(tmpDir, "symbols.json");
+    await fs.writeFile(jsonPath, JSON.stringify(payload));
     console.log(
       "[idea-bridge] Milvus ingestion skipped because DISABLE_MILVUS/MILVUS_DRY_RUN is set.",
     );
@@ -401,20 +441,41 @@ async function run() {
     return;
   }
 
-  console.log("Handing off to Python ingestor...");
-  await new Promise<void>((resolve, reject) => {
-    const proc = spawn("python3", [scriptPath, jsonPath], {
-      stdio: "inherit",
+  // Chunked ingest to avoid huge JSON payloads.
+  const chunkSize = Number(process.env.INGEST_CHUNK_SIZE ?? 2000);
+  let inserted = 0;
+  console.log(
+    `[idea-bridge] Ingesting ${embeddedRows.length} rows in chunks of ${chunkSize} (dim=${finalDimension})...`,
+  );
+  for (let start = 0; start < embeddedRows.length; start += chunkSize) {
+    const rows = embeddedRows.slice(start, start + chunkSize);
+    const payload = {
+      collectionName: config.milvusCollection,
+      vectorField: config.milvusVectorField,
+      dimension: finalDimension,
+      reset: config.resetMilvusCollection && start === 0,
+      milvusAddress: config.milvusGrpcAddress,
+      milvusDatabase: config.milvusDatabase,
+      rows,
+    };
+    const jsonPath = path.join(tmpDir, `symbols-${start}.json`);
+    await fs.writeFile(jsonPath, JSON.stringify(payload));
+
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn("python3", [scriptPath, jsonPath], {
+        stdio: "inherit",
+      });
+      proc.on("exit", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`Python ingestor exited with code ${code}`));
+      });
+      proc.on("error", (error) => reject(error));
     });
-    proc.on("exit", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`Python ingestor exited with code ${code}`));
-    });
-    proc.on("error", (error) => reject(error));
-  });
+    inserted += rows.length;
+  }
 
   await fs.rm(tmpDir, { recursive: true, force: true });
-  console.log(`Ingestion complete. Total entries: ${embeddedRows.length}`);
+  console.log(`Ingestion complete. Total entries: ${inserted}`);
 }
 
 run().catch((error) => {

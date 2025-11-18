@@ -106,14 +106,16 @@ def ensure_collection(payload):
         )
 
     collection = Collection(name=payload["collectionName"])
-    collection.create_index(
-        field_name=vector_field,
-        index_params={
-            "metric_type": "IP",
-            "index_type": "IVF_FLAT",
-            "params": {"nlist": 1024},
-        },
-    )
+    # Create index only if not present (script may run chunked)
+    if not collection.indexes:
+        collection.create_index(
+            field_name=vector_field,
+            index_params={
+                "metric_type": "IP",
+                "index_type": "IVF_FLAT",
+                "params": {"nlist": 1024},
+            },
+        )
     return collection
 
 
