@@ -15,6 +15,7 @@ echo ""
 
 # Ensure we're in the repo root
 cd "$(dirname "$0")/.."
+ROOT="$(pwd)"
 
 # Check prerequisites
 if ! command -v jq &> /dev/null; then
@@ -82,7 +83,8 @@ check_milvus() {
 }
 
 check_psi_cache() {
-  local cache="${BRIDGE_PSI_CACHE:-.idea-bridge/psi-cache.json}"
+  local default_cache="${ROOT}/idea-bridge/.idea-bridge/psi-cache.json"
+  local cache="${BRIDGE_PSI_CACHE:-$default_cache}"
   if [ ! -f "$cache" ]; then
     if [ "${ALLOW_MISSING_PSI_CACHE:-0}" = "1" ]; then
       echo "⚠️  WARNING: $cache not found; continuing because ALLOW_MISSING_PSI_CACHE=1"
