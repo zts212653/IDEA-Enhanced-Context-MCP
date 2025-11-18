@@ -403,26 +403,24 @@ async function run() {
     console.warn("[idea-bridge] vector length histogram", Object.fromEntries(hist));
   }
 
-  const payload = {
-    collectionName: config.milvusCollection,
-    vectorField: config.milvusVectorField,
-    dimension: finalDimension,
-    reset: config.resetMilvusCollection,
-    milvusAddress: config.milvusGrpcAddress,
-    milvusDatabase: config.milvusDatabase,
-    rows: embeddedRows,
-  };
-
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "idea-bridge-"));
-  const jsonPath = path.join(tmpDir, "symbols.json");
-  await fs.writeFile(jsonPath, JSON.stringify(payload));
-
   const scriptPath = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     "../../scripts/milvus_ingest.py",
   );
 
   if (process.env.DISABLE_MILVUS === "1" || process.env.MILVUS_DRY_RUN === "1") {
+    const payload = {
+      collectionName: config.milvusCollection,
+      vectorField: config.milvusVectorField,
+      dimension: finalDimension,
+      reset: config.resetMilvusCollection,
+      milvusAddress: config.milvusGrpcAddress,
+      milvusDatabase: config.milvusDatabase,
+      rows: embeddedRows,
+    };
+    const jsonPath = path.join(tmpDir, "symbols.json");
+    await fs.writeFile(jsonPath, JSON.stringify(payload));
     console.log(
       "[idea-bridge] Milvus ingestion skipped because DISABLE_MILVUS/MILVUS_DRY_RUN is set.",
     );
@@ -443,20 +441,41 @@ async function run() {
     return;
   }
 
-  console.log("Handing off to Python ingestor...");
-  await new Promise<void>((resolve, reject) => {
-    const proc = spawn("python3", [scriptPath, jsonPath], {
-      stdio: "inherit",
+  // Chunked ingest to avoid huge JSON payloads.
+  const chunkSize = Number(process.env.INGEST_CHUNK_SIZE ?? 2000);
+  let inserted = 0;
+  console.log(
+    `[idea-bridge] Ingesting ${embeddedRows.length} rows in chunks of ${chunkSize} (dim=${finalDimension})...`,
+  );
+  for (let start = 0; start < embeddedRows.length; start += chunkSize) {
+    const rows = embeddedRows.slice(start, start + chunkSize);
+    const payload = {
+      collectionName: config.milvusCollection,
+      vectorField: config.milvusVectorField,
+      dimension: finalDimension,
+      reset: config.resetMilvusCollection && start === 0,
+      milvusAddress: config.milvusGrpcAddress,
+      milvusDatabase: config.milvusDatabase,
+      rows,
+    };
+    const jsonPath = path.join(tmpDir, `symbols-${start}.json`);
+    await fs.writeFile(jsonPath, JSON.stringify(payload));
+
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn("python3", [scriptPath, jsonPath], {
+        stdio: "inherit",
+      });
+      proc.on("exit", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`Python ingestor exited with code ${code}`));
+      });
+      proc.on("error", (error) => reject(error));
     });
-    proc.on("exit", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`Python ingestor exited with code ${code}`));
-    });
-    proc.on("error", (error) => reject(error));
-  });
+    inserted += rows.length;
+  }
 
   await fs.rm(tmpDir, { recursive: true, force: true });
-  console.log(`Ingestion complete. Total entries: ${embeddedRows.length}`);
+  console.log(`Ingestion complete. Total entries: ${inserted}`);
 }
 
 run().catch((error) => {
