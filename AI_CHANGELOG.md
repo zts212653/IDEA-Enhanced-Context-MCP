@@ -6,6 +6,38 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 
 ## 2025-11-19
 
+### Antigravity Pass 1: Search Optimization & Automation Fix
+
+**Session Context**: User reported two issues: 1) "AOP dynamic proxies" query returned too many TEST classes. 2) `test-spring-framework.sh` failed when run automatically.
+
+**Files Changed**:
+- `mcp-server/src/searchPipeline.ts`
+- `idea-bridge/scripts/milvus_query.py`
+- `scripts/test-spring-framework.sh` (debugged & reverted)
+
+**What**:
+1. **Search Quality**: Added a penalty (-0.3) to symbols with the `TEST` role in `rankSymbols` unless the query explicitly contains "test".
+2. **Automation Fix**: Added `collection.load()` to `milvus_query.py` to ensure the Milvus collection is loaded even when `DISABLE_SCHEMA_CHECK=1` is set (which skips the implicit load).
+
+**Why**:
+1. Production code should be prioritized in general queries. The previous `entity-impact` profile actually boosted TEST roles, leading to noise.
+2. Automation scripts often skip schema checks for speed/safety, but Milvus requires the collection to be loaded into memory for searching.
+
+**Key Decisions**:
+- **Penalty vs Filter**: Chose a soft penalty (-0.3) instead of a hard filter so that test classes can still appear if they are highly relevant or if the query is specific enough, but they won't crowd out production code.
+- **Explicit Load**: Added `collection.load()` in the python script rather than the TS client to keep the fix close to the execution point and robust against different client configurations.
+
+**Testing**:
+- **Milestone B Tests**: Passed (6/6).
+- **Spring Framework Tests**: `test-spring-framework.sh` execution flow is fixed (no longer crashes with `ModuleNotFoundError` or collection errors). *Note*: Local execution returns 0 results due to missing full Spring Framework data in the local Milvus instance, but the script logic is verified.
+- **Manual Verification**: Verified "AOP dynamic proxies" query manually and confirmed the penalty logic.
+
+**Commits**:
+- `fix: optimize search ranking for TEST roles & fix automation script (by antigravity pass1)`
+
+**Next Steps**:
+- Run `test-spring-framework.sh` against a fully populated Milvus instance to verify the semantic quality improvements at scale.
+
 ### Claude Pass 3: Milestone B validation + documentation alignment + schema fix
 
 **Context**: Codex completed Milestone B implementation (staged search + context budget + dynamic Top-K) but lacked automated validation. Needed comprehensive testing, documentation alignment, and verification that features actually work.

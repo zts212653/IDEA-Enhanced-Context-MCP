@@ -38,21 +38,21 @@ type StagePreference = "module" | "class" | "method";
 
 type FilterSpec =
   | {
-      type: "role";
-      roles: Role[];
-      match?: "any" | "all";
-      optional?: boolean;
-    }
+    type: "role";
+    roles: Role[];
+    match?: "any" | "all";
+    optional?: boolean;
+  }
   | {
-      type: "module";
-      pattern: RegExp;
-      optional?: boolean;
-    }
+    type: "module";
+    pattern: RegExp;
+    optional?: boolean;
+  }
   | {
-      type: "text";
-      pattern: RegExp;
-      optional?: boolean;
-    };
+    type: "text";
+    pattern: RegExp;
+    optional?: boolean;
+  };
 
 type ResultGrouping = "none" | "byModule" | "byRole";
 type BudgetStrategy = "depth" | "breadth";
@@ -141,8 +141,8 @@ export function rankSymbols(
     typeof args.minTokenMatch === "number"
       ? args.minTokenMatch
       : tokens.length >= 4
-      ? 2
-      : 1;
+        ? 2
+        : 1;
 
   return symbols
     .filter((symbol) => {
@@ -153,10 +153,10 @@ export function rankSymbols(
             ? 1
             : 0
           : tokens.reduce(
-              (count, token) =>
-                haystack.includes(token) ? count + 1 : count,
-              0,
-            );
+            (count, token) =>
+              haystack.includes(token) ? count + 1 : count,
+            0,
+          );
       const matchesQuery =
         tokens.length === 0
           ? tokenMatches > 0
@@ -175,9 +175,15 @@ export function rankSymbols(
         (symbol.scoreHints?.lastModifiedDays ?? 90) < 14 ? 0.15 : 0;
       const moduleBoost =
         preferredModule && symbol.module === preferredModule ? 0.1 : 0;
+
+      // Penalize test files unless the query specifically asks for tests
+      const isTest = (symbol.metadata?.roles as string[] | undefined)?.includes("TEST") ||
+        inferRoles(symbol).includes("TEST");
+      const testPenalty = isTest && !normalizedQuery.includes("test") ? -0.3 : 0;
+
       return {
         symbol,
-        score: Math.min(baseScore + refBoost + recencyBoost + moduleBoost, 1),
+        score: Math.min(baseScore + refBoost + recencyBoost + moduleBoost + testPenalty, 1),
       };
     })
     .sort((a, b) => b.score - a.score)
@@ -328,10 +334,10 @@ function buildStageQuery(
   const parts: string[] = tokens.length
     ? [...tokens]
     : originalQuery
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, " ")
-        .split(/\s+/)
-        .filter(Boolean);
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean);
 
   const pushTokens = (...vals: string[]) => {
     for (const val of vals) {
@@ -1542,8 +1548,8 @@ function deriveSearchStrategy(args: SearchArguments): SearchStrategy {
     profile === "deep"
       ? ["module", "class", "method"]
       : profile === "targeted"
-      ? ["class"]
-      : ["module", "class"];
+        ? ["class"]
+        : ["module", "class"];
 
   const preferredLevels = Array.from(
     new Set(args.preferredLevels ?? defaultLevels),
@@ -1557,16 +1563,16 @@ function deriveSearchStrategy(args: SearchArguments): SearchStrategy {
       profile === "deep"
         ? "复杂查询或包含调用链/影响分析关键词"
         : profile === "targeted"
-        ? "短查询，仅需精准类/接口结果"
-        : "默认两阶段搜索",
+          ? "短查询，仅需精准类/接口结果"
+          : "默认两阶段搜索",
     preferredLevels,
     moduleLimit: profile === "deep" ? 8 : profile === "targeted" ? 3 : 5,
     classLimit:
       profile === "deep"
         ? Math.min(12, Math.max(args.limit ?? 8, 10))
         : profile === "targeted"
-        ? Math.min(6, args.limit ?? 5)
-        : Math.min(8, args.limit ?? 6),
+          ? Math.min(6, args.limit ?? 5)
+          : Math.min(8, args.limit ?? 6),
     methodLimit: preferredLevels.includes("method") ? 6 : 0,
     moduleFilter: args.moduleFilter ?? null,
     moduleHint: inferModuleHint(args.query, args.moduleHint ?? null),
