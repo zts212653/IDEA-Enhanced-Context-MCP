@@ -311,6 +311,8 @@ const hierarchyInfoSchema = z
   .object({
     superClass: z.string().nullable().optional(),
     interfaces: z.array(z.string()).optional(),
+    isAbstract: z.boolean().optional(),
+    isSealed: z.boolean().optional(),
   })
   .partial();
 
