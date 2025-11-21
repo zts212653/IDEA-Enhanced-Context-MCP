@@ -211,9 +211,10 @@ run_test() {
 
   # Run the test
   INFO "Query: ${test_cmd}"
-  # Use pushd/popd instead of cd in subshell to preserve env vars
+  # Execute the test command
+  # We run in a subshell to change directory without affecting the script
   if (cd "${ROOT}/mcp-server" && eval "${test_cmd}") > "${output_file}" 2>&1; then
-    # Validate
+    # Check if the output is valid JSON and has results
     if ${validation_fn} "${output_file}"; then
       PASS "${test_name}"
       PASSED=$((PASSED + 1))

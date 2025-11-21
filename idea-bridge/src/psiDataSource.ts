@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { BridgeConfig } from "./config.js";
 import { buildSymbolRecords } from "./indexer.js";
 import { loadPsiCache } from "./psiCache.js";
@@ -20,20 +22,21 @@ export async function loadInitialSymbols(
 ): Promise<PsiLoadResult> {
   const cached = await loadPsiCache(config.psiCachePath);
   if (cached?.symbols?.length) {
+    const normalized = normalizeCachedSymbols(cached.symbols, config.projectRoot);
     log?.info(
       {
         cachePath: config.psiCachePath,
         schemaVersion: cached.schemaVersion,
-        symbolCount: cached.symbols.length,
+        symbolCount: normalized.length,
       },
       "loaded PSI cache from previous export",
     );
     return {
-      records: cached.symbols,
+      records: normalized,
       source: "psi-cache",
       cacheInfo: {
         schemaVersion: cached.schemaVersion,
-        symbolCount: cached.symbols.length,
+        symbolCount: normalized.length,
       },
     };
   }
@@ -47,4 +50,29 @@ export async function loadInitialSymbols(
     records,
     source: "regex",
   };
+}
+
+function normalizeCachedSymbols(records: SymbolRecord[], projectRoot: string) {
+  return records.map((record) => {
+    if (!record.filePath) {
+      return record;
+    }
+    const relativePath = path.relative(projectRoot, record.filePath);
+    const isInsideProject = !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
+    if (!isInsideProject) {
+      return record;
+    }
+    const segments = relativePath.split(path.sep).filter(Boolean);
+    const moduleName = segments[0] ?? record.module;
+    const updated: SymbolRecord = {
+      ...record,
+      module: moduleName || record.module,
+      modulePath: path.join(projectRoot, moduleName ?? record.module ?? ""),
+      relativePath:
+        record.relativePath && record.relativePath !== record.filePath
+          ? record.relativePath
+          : relativePath,
+    };
+    return updated;
+  });
 }
