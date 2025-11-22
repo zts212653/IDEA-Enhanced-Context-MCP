@@ -661,6 +661,7 @@ function analyzeCallersInPsiCache(input: CallersToolInput): CallersAnalysisResul
   const lowered = methodFqn.toLowerCase();
   const callers: CallersAnalysisResult["callers"] = [];
 
+  // First pass: direct method calls (class#method).
   for (const sym of symbols) {
     const rel = sym.relations;
     if (!rel?.calls?.length) continue;
@@ -676,6 +677,29 @@ function analyzeCallersInPsiCache(input: CallersToolInput): CallersAnalysisResul
       isTest,
     });
     if (callers.length >= maxResults) break;
+  }
+
+  // Fallback: if no direct method calls are recorded in PSI, fall back to
+  // "types that reference the target class" as a coarse impact list.
+  if (!callers.length) {
+    const targetClassLower = targetClass.toLowerCase();
+    for (const sym of symbols) {
+      const rel = sym.relations;
+      const refs = rel?.references ?? [];
+      if (!refs.length) continue;
+      const refsLower = refs.map((ref) => ref.toLowerCase());
+      if (!refsLower.includes(targetClassLower)) continue;
+      const isTest = /test/i.test(sym.fqn) || /\/test\//i.test(sym.filePath);
+      if (excludeTest && isTest) continue;
+      callers.push({
+        classFqn: sym.fqn,
+        module: sym.module,
+        packageName: sym.packageName,
+        filePath: sym.filePath,
+        isTest,
+      });
+      if (callers.length >= maxResults) break;
+    }
   }
   callers.sort((a, b) => a.classFqn.localeCompare(b.classFqn));
   return {
