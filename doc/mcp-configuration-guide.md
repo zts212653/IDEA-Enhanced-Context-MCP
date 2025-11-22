@@ -100,6 +100,7 @@ The MCP server supports the following environment variables:
 - `BRIDGE_BODY_LIMIT` - Maximum upload payload size in bytes (default: `50 * 1024 * 1024`). Increase this if PSI export batches trigger `413 Payload Too Large`.
 - `INGEST_LIMIT` - Optional cap on symbol count during `npm run ingest:milvus`; useful for smoke tests on very large projects before attempting full ingest.
 - `NODE_OPTIONS="--max-old-space-size=8192"` - Increase Node heap if ingest crashes with `RangeError: Invalid string length` while stringifying the Milvus payload.
+ - `INGEST_MODULE_FILTER` - Comma-separated list of module names (e.g. `spring-aop,spring-context`) to restrict ingest to specific modules for focused experiments.
 
 ### Milvus Vector Database
 

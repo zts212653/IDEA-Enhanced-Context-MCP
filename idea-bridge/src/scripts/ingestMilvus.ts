@@ -51,6 +51,36 @@ function truncateArray<T>(values: T[], limit = 10) {
   return values.length > limit ? values.slice(0, limit) : values;
 }
 
+function parseCsvEnv(name: string): string[] | undefined {
+  const raw = process.env[name];
+  if (!raw) return undefined;
+  const parts = raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return parts.length ? parts : undefined;
+}
+
+function applyEnvFilters(records: SymbolRecord[]): SymbolRecord[] {
+  let filtered = records;
+  const moduleFilters = parseCsvEnv("INGEST_MODULE_FILTER");
+  if (moduleFilters) {
+    const before = filtered.length;
+    filtered = filtered.filter((record) => {
+      return moduleFilters.some((mod) => {
+        if (!mod) return false;
+        if (record.module === mod) return true;
+        if (record.modulePath && record.modulePath.includes(mod)) return true;
+        return false;
+      });
+    });
+    console.log(
+      `[idea-bridge] INGEST_MODULE_FILTER active: ${moduleFilters.join(",")} records ${before} -> ${filtered.length}`,
+    );
+  }
+  return filtered;
+}
+
 function vectorNorm(vec: number[]): number {
   let sum = 0;
   for (const v of vec) sum += v * v;
@@ -304,7 +334,7 @@ function prepareRow(
 async function run() {
   const config = loadConfig();
   const initial = await loadInitialSymbols(config);
-  let records = initial.records;
+  let records = applyEnvFilters(initial.records);
   const ingestLimit = process.env.INGEST_LIMIT
     ? Number(process.env.INGEST_LIMIT)
     : undefined;
