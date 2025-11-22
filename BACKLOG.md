@@ -135,11 +135,11 @@
 
 ### C.2 调用关系 / 引用关系建模
 
-- [ ] 在 PSI Exporter 中增加基本调用关系：
-  - [ ] 记录方法调用的 FQN 列表（可简化为字符串数组）。
-  - [ ] 记录「该方法被谁调用」的计数（用于排序）。
+- [x] 在 PSI Exporter 中增加基本调用关系（已在当前 Spring Framework PSI cache 中生效）：
+  - [x] 记录类级别的方法调用 FQN 列表（`relations.calls`，形如 `SomeClass#someMethod`）。
+  - [x] 基于依赖信息 + 调用目标构建 `relations.references`（引用到的类型列表），可用于粗粒度的影响面估计。
 - [ ] 在 Milvus metadata 中增加：
-  - [ ] `callersCount / calleesCount`。
+  - [ ] `callersCount / calleesCount`（目前只在 PSI cache 中存在，尚未下沉到向量元数据）。
   - [ ] 简单的 `relationSummary`。
 - [ ] 为后续「影响分析」类工具预留字段（比如 `framework = "wushan-java"` / `isTestCode`）。
 
@@ -158,16 +158,20 @@
 
 ### C.4 MCP 新工具：`analyze_callers_of_method`
 
-- [ ] 新增 MCP 工具：
+- [x] 新增 MCP 工具：
   - 输入：
-    - [ ] `methodFqn: string`（例如 `com.company.ws.WsHttpClient.send`）
-    - [ ] `filters?: { excludeTest?: boolean; framework?: string }`
-  - 行为：
-    - [ ] 在 `indexLevel = "method"` 中检索调用该方法的所有方法/类。
-    - [ ] 结合 `module` / `framework` / `isTestCode` 做过滤。
+    - [x] `methodFqn: string`（例如 `org.springframework.jdbc.core.JdbcTemplate#query`）。
+    - [x] `excludeTest?: boolean`（默认 `true`，过滤掉测试类调用方）。
+    - [x] `maxResults?: number`（默认 `200`，上限 `500`）。
+  - 行为（当前实现）：
+    - [x] 直接从 PSI cache（`BRIDGE_PSI_CACHE` 或默认 `idea-bridge/.idea-bridge/psi-cache.json`）读取 `symbols[].relations`，不依赖 Milvus。
+    - [x] 第一轮基于 `relations.calls` 查找直接调用目标 `class#method` 的类（class 级别聚合）。
+    - [x] 若没有直接调用，则回退到 `relations.references`，视作“引用该类型的类”，构建粗粒度影响面。
+    - [x] 支持 `excludeTest` 过滤掉 `fqn/filePath` 中包含 `test` 的类，适配生产级影响分析场景。
   - 输出：
-    - [ ] 对调用者按「在生产代码中」「调用频次」「所属服务」排序的列表。
-- [ ] 这是 `wushan-java-showcase` 场景 1 的技术前置条件。
+    - [x] 返回 `targetMethod/targetClass` + `callers[]`（包含 `classFqn/module/packageName/filePath/isTest`），按 `classFqn` 排序。
+    - [ ] 后续可扩展为区分 direct calls 与 referrers，并对调用频次聚合排序。
+- [ ] 将该工具整合进 Wushan / Nuwa 迁移场景的高层 workflow 中（例如在 `doc/wushan-java-showcase.md` 里给出“找出所有调用 WsHttpClient.send 的生产代码”的端到端示例）。
 
 ---
 
