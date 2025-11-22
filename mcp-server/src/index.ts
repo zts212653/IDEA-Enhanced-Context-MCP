@@ -1,4 +1,7 @@
+import fs from "node:fs";
 import net from "node:net";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -247,6 +250,26 @@ const milvusHealthSchema = z.object({
   reachable: z.boolean(),
   message: z.string().nullable(),
 });
+
+const callersToolInputSchema = z.object({
+  methodFqn: z
+    .string({
+      required_error: "methodFqn is required",
+      invalid_type_error: "methodFqn must be a string",
+    })
+    .min(3, "methodFqn must be at least 3 characters"),
+  excludeTest: z
+    .boolean({ invalid_type_error: "excludeTest must be a boolean" })
+    .optional(),
+  maxResults: z
+    .number({ invalid_type_error: "maxResults must be a number" })
+    .int("maxResults must be an integer")
+    .min(1, "maxResults must be >= 1")
+    .max(500, "maxResults must be <= 500")
+    .optional(),
+});
+
+type CallersToolInput = z.infer<typeof callersToolInputSchema>;
 
 const server = new McpServer(
   {
@@ -570,6 +593,98 @@ function describeDeliveredHit(hit: SearchHit) {
   };
 }
 
+type PsiCacheSymbol = {
+  repoName: string;
+  fqn: string;
+  kind: string;
+  module: string;
+  modulePath: string;
+  packageName: string;
+  relativePath: string;
+  filePath: string;
+  summary: string;
+  relations?: RelationInfo;
+  quality?: { methodCount?: number; fieldCount?: number; annotationCount?: number };
+};
+
+type CallersAnalysisResult = {
+  targetMethod: string;
+  targetClass: string;
+  callers: Array<{
+    classFqn: string;
+    module: string;
+    packageName: string;
+    filePath: string;
+    isTest: boolean;
+  }>;
+};
+
+function resolvePsiCachePathFromEnv(): string {
+  const explicit = process.env.BRIDGE_PSI_CACHE ?? process.env.PSI_CACHE_PATH;
+  if (explicit) {
+    return explicit;
+  }
+  // Default to bridge-local cache under the monorepo.
+  return path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../idea-bridge/.idea-bridge/psi-cache.json",
+  );
+}
+
+function analyzeCallersInPsiCache(input: CallersToolInput): CallersAnalysisResult {
+  const methodFqn = input.methodFqn.trim();
+  const hashIndex = methodFqn.indexOf("#");
+  const targetClass = hashIndex > 0 ? methodFqn.slice(0, hashIndex) : methodFqn;
+  const cachePath = resolvePsiCachePathFromEnv();
+  let raw: string;
+  try {
+    raw = fs.readFileSync(cachePath, "utf8");
+  } catch (error) {
+    throw new Error(
+      `Failed to read PSI cache at ${cachePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  let json: any;
+  try {
+    json = JSON.parse(raw) as { symbols?: PsiCacheSymbol[] };
+  } catch (error) {
+    throw new Error(
+      `Failed to parse PSI cache JSON at ${cachePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const symbols: PsiCacheSymbol[] = Array.isArray(json?.symbols) ? (json.symbols as PsiCacheSymbol[]) : [];
+  if (!symbols.length) {
+    return { targetMethod: methodFqn, targetClass, callers: [] };
+  }
+  const excludeTest = input.excludeTest ?? true;
+  const maxResults = input.maxResults ?? 200;
+  const lowered = methodFqn.toLowerCase();
+  const callers: CallersAnalysisResult["callers"] = [];
+
+  for (const sym of symbols) {
+    const rel = sym.relations;
+    if (!rel?.calls?.length) continue;
+    const callsLower = rel.calls.map((c) => c.toLowerCase());
+    if (!callsLower.some((c) => c === lowered)) continue;
+    const isTest = /test/i.test(sym.fqn) || /\/test\//i.test(sym.filePath);
+    if (excludeTest && isTest) continue;
+    callers.push({
+      classFqn: sym.fqn,
+      module: sym.module,
+      packageName: sym.packageName,
+      filePath: sym.filePath,
+      isTest,
+    });
+    if (callers.length >= maxResults) break;
+  }
+  callers.sort((a, b) => a.classFqn.localeCompare(b.classFqn));
+  return {
+    targetMethod: methodFqn,
+    targetClass,
+    callers,
+  };
+}
+
 const searchToolDefinition = {
   title: "IDEA staged semantic search",
   description:
@@ -663,6 +778,71 @@ server.registerTool(
       "[Deprecation notice] Alias of search_java_symbol. Prefer passing preferredLevels/moduleHint/maxContextTokens for staged control.",
   },
   handleSearchTool,
+);
+
+server.registerTool(
+  "analyze_callers_of_method",
+  {
+    title: "Analyze callers of a Java method using PSI call graph",
+    description:
+      "Given a method FQN like 'com.company.ws.WsHttpClient#send', scan the PSI cache and return classes that call this method.",
+    inputSchema: callersToolInputSchema,
+    outputSchema: z.object({
+      targetMethod: z.string(),
+      targetClass: z.string(),
+      callers: z.array(
+        z.object({
+          classFqn: z.string(),
+          module: z.string(),
+          packageName: z.string(),
+          filePath: z.string(),
+          isTest: z.boolean(),
+        }),
+      ),
+    }),
+  },
+  async (args) => {
+    const parsed = callersToolInputSchema.parse(args ?? {});
+    let analysis: CallersAnalysisResult;
+    try {
+      analysis = analyzeCallersInPsiCache(parsed);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : `Failed to analyze callers: ${String(error)}`;
+      return {
+        content: [
+          {
+            type: "text",
+            text: message,
+          },
+        ],
+        structuredContent: {
+          targetMethod: parsed.methodFqn,
+          targetClass: parsed.methodFqn.split("#")[0] ?? parsed.methodFqn,
+          callers: [],
+        },
+      };
+    }
+    const summaryLines = [
+      `Target method: ${analysis.targetMethod} (class: ${analysis.targetClass})`,
+      `Callers (${analysis.callers.length}):`,
+      ...analysis.callers.slice(0, 10).map((caller) =>
+        `- ${caller.classFqn} [module=${caller.module}] ${caller.isTest ? "(TEST)" : ""}`,
+      ),
+      analysis.callers.length > 10
+        ? `… and ${analysis.callers.length - 10} more caller classes.`
+        : "",
+    ].filter((line) => line.length > 0);
+    return {
+      content: [
+        {
+          type: "text",
+          text: summaryLines.join("\n"),
+        },
+      ],
+      structuredContent: analysis,
+    };
+  },
 );
 
 const transport = new StdioServerTransport();
