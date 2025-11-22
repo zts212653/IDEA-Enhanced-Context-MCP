@@ -52,27 +52,51 @@ export async function loadInitialSymbols(
   };
 }
 
-function normalizeCachedSymbols(records: SymbolRecord[], projectRoot: string) {
+function normalizeCachedSymbols(records: SymbolRecord[], configuredRoot: string) {
   return records.map((record) => {
     if (!record.filePath) {
       return record;
     }
-    const relativePath = path.relative(projectRoot, record.filePath);
-    const isInsideProject = !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
+    const effectiveRoot = deriveProjectRoot(record.filePath, configuredRoot, record.repoName);
+    const relativePath = path.relative(effectiveRoot, record.filePath);
+    const isInsideProject =
+      relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
     if (!isInsideProject) {
-      return record;
+      return {
+        ...record,
+        relativePath: record.relativePath ?? record.filePath,
+      };
     }
     const segments = relativePath.split(path.sep).filter(Boolean);
-    const moduleName = segments[0] ?? record.module;
+    const moduleName = segments[0] ?? record.module ?? record.repoName;
     const updated: SymbolRecord = {
       ...record,
-      module: moduleName || record.module,
-      modulePath: path.join(projectRoot, moduleName ?? record.module ?? ""),
-      relativePath:
-        record.relativePath && record.relativePath !== record.filePath
-          ? record.relativePath
-          : relativePath,
+      module: moduleName,
+      modulePath: moduleName,
+      relativePath,
+      filePath: record.filePath,
     };
     return updated;
   });
+}
+
+function deriveProjectRoot(filePath: string, configuredRoot: string, repoName?: string) {
+  if (configuredRoot && isSubPath(filePath, configuredRoot)) {
+    return configuredRoot;
+  }
+  const normalized = path.normalize(filePath);
+  const parts = normalized.split(path.sep).filter((part, idx) => part || idx === 0);
+  const repoIndex = repoName ? parts.lastIndexOf(repoName) : -1;
+  if (repoIndex > 0) {
+    const prefix = parts.slice(0, repoIndex + 1);
+    const candidate = prefix.join(path.sep) || path.sep;
+    return candidate;
+  }
+  return configuredRoot || path.dirname(filePath);
+}
+
+function isSubPath(target: string, root: string) {
+  if (!root) return false;
+  const relative = path.relative(root, target);
+  return relative && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
