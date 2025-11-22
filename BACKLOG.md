@@ -104,6 +104,21 @@
 - [x] `run_eval.mjs` 增加 `--fixtureOnly`/`skipped` 逻辑，避免 CI 因缺少真实 Milvus 而失败。
 - [x] `.github/workflows/mcp-eval.yml` 切换到 fixture-only eval，确保 CI 具备再现性。
 
+**当前全量向量库状态（Spring Framework）**
+
+- Milvus 中 `idea_symbols` 集合已完成全量 ingest（当前约 7.7 万行），包含 module/class/method 层索引。
+- 在 Spring Framework 仓上，使用 `mcp-server/scripts/test-spring-framework.sh` 和 `tmp/search-*.json` 观察到：
+  - AOP 场景（如 "How does Spring AOP create dynamic proxies and apply advice?"）的前几名命中基本落在 `spring-aop` 及相关模块的核心类/方法上（例如 `AspectJAroundAdvice#lazyGetProceedingJoinPoint`）。
+  - BeanPostProcessor / Bean 场景已明显减少测试类主导的情况，但 top1 仍偶尔落在 JMX / MessageSource 等基础设施类上，需要在 C 阶段进一步用结构信息和方法调用关系微调排序。
+  - 事件场景的模块集中在 `spring-context`/`spring-messaging`，但还未稳定锁定到 `DefaultEventListenerFactory` / `EventMulticaster` 等理想目标。Ranking B.1 会在 C 期间结合 call graph 和 roles 继续收紧。
+
+后续在 C 阶段的观测/调优：
+
+- 利用 `tmp/search-*.json`（AOP / Bean / BeanPostProcessor / 事件等场景）作为 Ranking B.1 的回归样本，每次调整后重跑 `test-spring-framework.sh`，重点观察：
+  - 前 3 条结果是否更稳定地落在正确模块（`spring-aop`/`spring-context`）和核心类型上。
+  - 测试类在这些场景中的出现频率是否继续下降（除非 query 明确要求 tests）。
+- 方法级索引和调用关系（Milestone C）引入后，优先利用 callers/callees 信息在 Impact/Migration 场景中进一步优化排序，而不是再增加新的 isXxxClass 规则。
+
 ---
 
 ## 3. Milestone C · 方法级索引 & 调用关系（为 Wushan Show Case 做准备）
