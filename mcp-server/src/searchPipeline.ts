@@ -175,15 +175,92 @@ export function rankSymbols(
         (symbol.scoreHints?.lastModifiedDays ?? 90) < 14 ? 0.15 : 0;
       const moduleBoost =
         preferredModule && symbol.module === preferredModule ? 0.1 : 0;
+      const roles = inferRoles(symbol);
 
       // Penalize test files unless the query specifically asks for tests
-      const isTest = (symbol.metadata?.roles as string[] | undefined)?.includes("TEST") ||
-        inferRoles(symbol).includes("TEST");
-      const testPenalty = isTest && !normalizedQuery.includes("test") ? -0.3 : 0;
+      const isTest =
+        (symbol.metadata?.roles as string[] | undefined)?.includes("TEST") ||
+        roles.includes("TEST");
+      const wantsTests =
+        normalizedQuery.includes("test") || normalizedQuery.includes("tests");
+      const testPenalty = isTest && !wantsTests ? -0.45 : 0;
 
+      // Semantic boosts based on query tokens + roles + FQN/package.
+      const fqnLower = symbol.fqn.toLowerCase();
+      const pkgLower = (symbol.packageName ?? "").toLowerCase();
+      let semanticBoost = 0;
+
+      const hasToken = (needle: string) => tokens.includes(needle.toLowerCase());
+
+      // AOP / proxy-oriented queries
+      if (
+        hasToken("aop") ||
+        hasToken("proxy") ||
+        hasToken("proxies") ||
+        hasToken("advice")
+      ) {
+        if (pkgLower.includes(".aop") || fqnLower.includes(".aop.")) {
+          semanticBoost += 0.3;
+        }
+        if (
+          fqnLower.includes("proxyfactory") ||
+          fqnLower.includes("aopproxy") ||
+          fqnLower.includes("advisor")
+        ) {
+          semanticBoost += 0.25;
+        }
+      }
+
+      // Bean scanning / registration
+      const beanQuery =
+        hasToken("bean") &&
+        (hasToken("scan") || hasToken("scanning") || hasToken("register"));
+      if (beanQuery) {
+        if (
+          fqnLower.includes("beandefinitionscanner") ||
+          fqnLower.includes("classpathbeandefinitionscanner") ||
+          fqnLower.includes("classpathscanningcandidate") ||
+          fqnLower.includes("componentscan")
+        ) {
+          semanticBoost += 0.35;
+        }
+        if (roles.includes("SPRING_BEAN") || roles.includes("CONFIG")) {
+          semanticBoost += 0.1;
+        }
+      }
+
+      // BeanPostProcessor-style impact queries
+      if (hasToken("beanpostprocessor")) {
+        if (fqnLower.includes("beanpostprocessor")) {
+          semanticBoost += 0.35;
+        }
+        if (roles.includes("SPRING_BEAN") || roles.includes("CONFIG")) {
+          semanticBoost += 0.1;
+        }
+        if (isTest && !wantsTests) {
+          semanticBoost -= 0.1;
+        }
+      }
+
+      // Application events
+      if (hasToken("event") || hasToken("events")) {
+        if (pkgLower.includes("context.event")) {
+          semanticBoost += 0.3;
+        }
+        if (
+          fqnLower.includes("eventlistener") ||
+          fqnLower.includes("applicationevent") ||
+          fqnLower.includes("eventmulticaster")
+        ) {
+          semanticBoost += 0.25;
+        }
+      }
+
+      const rawScore =
+        baseScore + refBoost + recencyBoost + moduleBoost + testPenalty + semanticBoost;
       return {
         symbol,
-        score: Math.min(baseScore + refBoost + recencyBoost + moduleBoost + testPenalty, 1),
+        score: Math.max(Math.min(rawScore, 1), 0),
       };
     })
     .sort((a, b) => b.score - a.score)

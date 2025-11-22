@@ -108,7 +108,7 @@
 
 ## 3. Milestone C · 方法级索引 & 调用关系（为 Wushan Show Case 做准备）
 
-> 目标：为 `doc/wushan-java-showcase.md` 中那种「找出所有调用 WsHttpClient.send 的生产代码」提供技术基础。
+> 目标：为 `doc/wushan-java-showcase.md` 中那种「找出所有调用 WsHttpClient.send 的生产代码」提供技术基础；同时在 C 期间完成一次 Ranking B.1 优化，减少测试噪声，让 AOP/Bean 场景更贴近真实框架语义。
 
 ### C.1 方法级索引（indexLevel = "method"）
 
@@ -128,7 +128,20 @@
   - [ ] 简单的 `relationSummary`。
 - [ ] 为后续「影响分析」类工具预留字段（比如 `framework = "wushan-java"` / `isTestCode`）。
 
-### C.3 MCP 新工具：`analyze_callers_of_method`
+### C.3 Ranking B.1（与方法级能力同期完成）
+
+- [x] 在 `rankSymbols` 中基于 query tokens + roles + package/fqn 添加轻量语义打分：
+  - [x] AOP/proxy 场景：提升 `org.springframework.aop.*` 包中的 `*ProxyFactory*`、`*AopProxy*`、`*Advisor*` 等核心类权重。
+  - [x] Bean 扫描 / 注册场景：提升 `*BeanDefinitionScanner*`、`ClassPath*Scanning*`、`ComponentScan` 等类权重，并对 `SPRING_BEAN/CONFIG` 角色做小幅 boost。
+  - [x] BeanPostProcessor 场景：提升 `*BeanPostProcessor*` 及相关配置类权重，并对测试类做更强 penalty。
+  - [x] 事件场景：提升 `org.springframework.context.event.*`、`*EventListener*`、`*ApplicationEvent*`、`*EventMulticaster*` 等类权重。
+- [x] 更强 TEST 惩罚：在非测试查询中对 `TEST` 角色施加更大的负权重，并在 BeanPostProcessor 场景中进一步压低测试类排序。
+- [ ] 在 Spring Framework 大仓上，用 `scripts/test-spring-framework.sh` 和 eval harness 校验：
+  - [ ] AOP 相关查询的前 3 条结果中至少包含若干生产级 AOP 配置 / 代理类。
+  - [ ] BeanPostProcessor 场景中测试类不再主导前几名结果。
+  - [ ] 事件场景能稳定返回 `DefaultEventListenerFactory` 等核心类。
+
+### C.4 MCP 新工具：`analyze_callers_of_method`
 
 - [ ] 新增 MCP 工具：
   - 输入：
