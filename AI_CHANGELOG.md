@@ -13,6 +13,7 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 - Documentation: expanded `doc/SCENARIO_orders_impact.md` with explicit MCP调用顺序、Blast radius 汇总、多态实现说明（Qualifier/Primary 提示）。
 - Ranking/roles: refined `semanticRoles.ts` to reduce伪 REST_CONTROLLER/Mapper/Config/DTO 误报（名后缀 + 包名 +注解），added impact-analysis structural boosts in `searchPipeline.ts` (controllers/services/mapper + callers/callees + HTTP/MQ/DB + TEST penalty) to favor WebMVC/影响分析场景。
 - Bridge fixes: `config.ts` now honors `EMBEDDING_MODEL/EMBEDDING_HOST` over Ollama defaults; `ingestMilvus.ts` logs embedding progress (`EMBED_LOG_EVERY`) and provider/model to avoid silent long runs; `scripts/jina_server.py` logs requests and supports nohup logging to `/tmp/jina_server.log` with Jina startup steps added to `doc/mcp-configuration-guide.md`.
+- Follow-up: adjusted bridge host/model precedence for provider=jina (ignore `OLLAMA_HOST` when provider=jina), and fallback embeddings now use provider-appropriate dimensions (1024 for Jina) to avoid 384-dim pollution when upstream fails.
 
 **Testing**:
 - `mcp-server`: `npm run build` ✅

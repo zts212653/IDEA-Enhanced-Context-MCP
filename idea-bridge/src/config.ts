@@ -60,16 +60,28 @@ export function loadConfig(): BridgeConfig {
       process.env.EMBEDDING_TASK_PASSAGE ?? "retrieval.passage",
     embeddingTaskQuery:
       process.env.EMBEDDING_TASK_QUERY ?? "retrieval.query",
-    embeddingModel:
-      process.env.EMBEDDING_MODEL ??
-      process.env.IEC_EMBED_MODEL ??
-      process.env.EMBED_MODEL ??
-      process.env.OLLAMA_MODEL ??
-      "manutic/nomic-embed-code",
-    embeddingHost:
-      process.env.OLLAMA_HOST ??
-      process.env.EMBEDDING_HOST ??
-      "http://127.0.0.1:11434",
+    embeddingModel: (() => {
+      const explicit =
+        process.env.EMBEDDING_MODEL ??
+        process.env.IEC_EMBED_MODEL ??
+        process.env.EMBED_MODEL ??
+        process.env.OLLAMA_MODEL;
+      if (explicit) return explicit;
+      const provider = process.env.EMBEDDING_PROVIDER?.toLowerCase();
+      if (provider === "jina") return "jinaai/jina-embeddings-v3";
+      return "manutic/nomic-embed-code";
+    })(),
+    embeddingHost: (() => {
+      const provider = process.env.EMBEDDING_PROVIDER?.toLowerCase();
+      if (provider === "jina") {
+        return process.env.EMBEDDING_HOST ?? "http://127.0.0.1:7997";
+      }
+      return (
+        process.env.OLLAMA_HOST ??
+        process.env.EMBEDDING_HOST ??
+        "http://127.0.0.1:11434"
+      );
+    })(),
     resetMilvusCollection: process.env.MILVUS_RESET === "1",
   };
 }

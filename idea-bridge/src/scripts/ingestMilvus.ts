@@ -378,7 +378,7 @@ async function run() {
   const totalEntries = entries.length;
   const embedLogEvery = Number(process.env.EMBED_LOG_EVERY ?? 200);
   console.log(
-    `[idea-bridge] Embedding ${totalEntries} entries (provider=${config.embeddingProvider}, model=${config.embeddingModel})...`,
+    `[idea-bridge] Embedding ${totalEntries} entries (provider=${config.embeddingProvider}, model=${config.embeddingModel}, host=${config.embeddingHost})...`,
   );
   function resizeExistingRows(targetDimension: number) {
     for (const row of embeddedRows) {
@@ -392,6 +392,13 @@ async function run() {
   for (const entry of entries) {
     const prompt = entry.embeddingText;
     let embedding: number[];
+    const desiredDimension =
+      dimension ??
+      (config.embeddingProvider === "jina"
+        ? 1024
+        : config.embeddingProvider === "ollama"
+          ? 768
+          : 768);
     try {
       embedding = await generateEmbedding(
         prompt,
@@ -405,7 +412,7 @@ async function run() {
         `[idea-bridge] embedding failed for ${entry.id}, using fallback`,
         error instanceof Error ? error.message : error,
       );
-      embedding = fallbackEmbedding(prompt, dimension ?? 384);
+      embedding = fallbackEmbedding(prompt, desiredDimension);
       fallbackCount += 1;
     }
 
