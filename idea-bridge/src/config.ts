@@ -61,8 +61,10 @@ export function loadConfig(): BridgeConfig {
     embeddingTaskQuery:
       process.env.EMBEDDING_TASK_QUERY ?? "retrieval.query",
     embeddingModel:
+      process.env.EMBEDDING_MODEL ??
       process.env.IEC_EMBED_MODEL ??
       process.env.EMBED_MODEL ??
+      process.env.OLLAMA_MODEL ??
       "manutic/nomic-embed-code",
     embeddingHost:
       process.env.OLLAMA_HOST ??

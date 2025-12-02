@@ -375,6 +375,11 @@ async function run() {
   const embeddedRows: Array<ReturnType<typeof prepareRow>> = [];
   let dimension: number | undefined;
   let fallbackCount = 0;
+  const totalEntries = entries.length;
+  const embedLogEvery = Number(process.env.EMBED_LOG_EVERY ?? 200);
+  console.log(
+    `[idea-bridge] Embedding ${totalEntries} entries (provider=${config.embeddingProvider}, model=${config.embeddingModel})...`,
+  );
   function resizeExistingRows(targetDimension: number) {
     for (const row of embeddedRows) {
       const vector = row[config.milvusVectorField];
@@ -421,6 +426,11 @@ async function run() {
     }
 
     embeddedRows.push(prepareRow(entry, embedding, config.milvusVectorField));
+    if (embeddedRows.length % embedLogEvery === 0 || embeddedRows.length === totalEntries) {
+      console.log(
+        `[idea-bridge] embedded ${embeddedRows.length}/${totalEntries} (fallbacks=${fallbackCount})`,
+      );
+    }
   }
 
   if (fallbackCount > 0) {

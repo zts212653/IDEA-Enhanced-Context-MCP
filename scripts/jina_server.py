@@ -43,6 +43,7 @@ app = FastAPI(title="Jina v3 embedding service", version="1.0.0")
 print(f"[jina-server] loading {MODEL} on {DEVICE} (FP16)...")
 model = SentenceTransformer(MODEL, trust_remote_code=True, device=DEVICE)
 model.half()
+print("[jina-server] model loaded.")
 
 
 class EmbedRequest(BaseModel):
@@ -54,6 +55,10 @@ class EmbedRequest(BaseModel):
 async def embed(req: EmbedRequest):
   try:
     texts = [req.inputs] if isinstance(req.inputs, str) else req.inputs
+    print(
+      f"[jina-server] embedding {len(texts)} item(s) "
+      f"task={req.instruction} batch_size=32",
+    )
     vectors = model.encode(
       texts,
       task=req.instruction,
@@ -69,4 +74,4 @@ async def embed(req: EmbedRequest):
 
 
 if __name__ == "__main__":
-  uvicorn.run(app, host=HOST, port=PORT)
+  uvicorn.run(app, host=HOST, port=PORT, log_level="info")

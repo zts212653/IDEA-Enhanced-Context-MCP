@@ -114,6 +114,45 @@ The MCP server supports the following environment variables:
 - `OLLAMA_BASE_URL` - Ollama API endpoint (for local embeddings)
 - `OLLAMA_MODEL` - Ollama embedding model name
 - `OPENAI_API_KEY` - For OpenAI embeddings (if not using Ollama)
+- `EMBEDDING_PROVIDER` / `EMBEDDING_HOST` / `EMBEDDING_MODEL` - generic embedding selector; set provider to `jina` + host/model to target the lightweight Jina server.
+
+### Jina embedding server（本地）
+
+**前台启动（便于看日志）**
+```bash
+cd /Users/lysander/projects/IDEA-Enhanced-Context-MCP
+source .venv/bin/activate
+HF_HOME=~/.cache/hf_jina_clean TRANSFORMERS_CACHE=~/.cache/hf_jina_clean \
+HF_HUB_ENABLE_HF_TRANSFER=1 HF_HUB_DISABLE_SYMLINKS_WARNING=1 \
+HOST=127.0.0.1 PORT=7997 MODEL=jinaai/jina-embeddings-v3 DEVICE=mps \
+python scripts/jina_server.py
+```
+- 日志包含 `[jina-server] embedding ...`，Uvicorn info 级别。
+
+**后台运行**
+```bash
+source .venv/bin/activate
+HF_HOME=~/.cache/hf_jina_clean TRANSFORMERS_CACHE=~/.cache/hf_jina_clean \
+HF_HUB_ENABLE_HF_TRANSFER=1 HF_HUB_DISABLE_SYMLINKS_WARNING=1 \
+HOST=127.0.0.1 PORT=7997 MODEL=jinaai/jina-embeddings-v3 DEVICE=mps \
+nohup python scripts/jina_server.py > /tmp/jina_server.log 2>&1 &
+```
+- 查看日志：`tail -f /tmp/jina_server.log`
+- 停止：`pkill -f jina_server.py`
+
+**入库时确保走 Jina（避免 OLLAMA_HOST 抢优先级）**
+```bash
+PATH=/Users/lysander/projects/IDEA-Enhanced-Context-MCP/.venv/bin:$PATH \
+BRIDGE_PSI_CACHE=.idea-bridge/psi-cache-spring-framework.json \
+MILVUS_COLLECTION=idea_symbols_spring_jina \
+EMBEDDING_PROVIDER=jina \
+EMBEDDING_HOST=http://127.0.0.1:7997 \
+EMBEDDING_MODEL=jinaai/jina-embeddings-v3 \
+OLLAMA_HOST= OLLAMA_MODEL= \
+EMBED_LOG_EVERY=200 \
+npm run ingest:milvus
+```
+ingest 开头会打印 provider/model，每 `EMBED_LOG_EVERY` 条打印一次进度。
 
 ## Verification
 

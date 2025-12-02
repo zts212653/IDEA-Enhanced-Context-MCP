@@ -4,6 +4,24 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 
 ---
 
+## 2025-12-01
+
+### Codex Pass 36: Petclinic Jina vs Nomic A/B + Impact Ranking Heuristics
+
+**What**:
+- Ran petclinic A/B: ingested `idea_symbols_petclinic_nomic` via `manutic/nomic-embed-code:latest` (8/247 fallback due to -Inf), compared with existing Jina collection; captured query outputs under `tmp/ab*-petclinic-*.json`. Jina surfaces correct `VisitResource` REST 入口；nomic 结果多为测试/噪声。
+- Documentation: expanded `doc/SCENARIO_orders_impact.md` with explicit MCP调用顺序、Blast radius 汇总、多态实现说明（Qualifier/Primary 提示）。
+- Ranking/roles: refined `semanticRoles.ts` to reduce伪 REST_CONTROLLER/Mapper/Config/DTO 误报（名后缀 + 包名 +注解），added impact-analysis structural boosts in `searchPipeline.ts` (controllers/services/mapper + callers/callees + HTTP/MQ/DB + TEST penalty) to favor WebMVC/影响分析场景。
+- Bridge fixes: `config.ts` now honors `EMBEDDING_MODEL/EMBEDDING_HOST` over Ollama defaults; `ingestMilvus.ts` logs embedding progress (`EMBED_LOG_EVERY`) and provider/model to avoid silent long runs; `scripts/jina_server.py` logs requests and supports nohup logging to `/tmp/jina_server.log` with Jina startup steps added to `doc/mcp-configuration-guide.md`.
+
+**Testing**:
+- `mcp-server`: `npm run build` ✅
+- `idea-bridge`: `npm run build` ✅
+
+**Notes**:
+- Nomic 抽象向量偶发 -Inf 导致 fallback，如需彻底过滤需调整 bridge embedding 逻辑（当前仅 fallback，不跳过行）。
+- Spring Framework 大仓（`idea_symbols` 3584-dim）可用 Jina 环境继续验证 C 阶段排序质量；petclinic 数据过小难观察 DB/MQ 信号。
+
 ## 2025-11-25
 
 ### Codex Pass 26: Milestone C.1 Method-Level Index Sanity & Callers Tool Check

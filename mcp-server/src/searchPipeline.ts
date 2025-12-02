@@ -1520,6 +1520,7 @@ function getBoostedScore(
     typeof metadata.callersCount === "number" ? metadata.callersCount : 0;
   const calleesCount =
     typeof metadata.calleesCount === "number" ? metadata.calleesCount : 0;
+  const fqnLower = hit.fqn.toLowerCase();
 
   // Impact-style boost: heavily-used or central classes score higher.
   const impactBoost =
@@ -1539,7 +1540,19 @@ function getBoostedScore(
   const isTest = roles.includes("TEST");
   const testImpactPenalty = isTest ? -0.3 : 0;
 
-  return base + bonus + impactBoost + infraBoost + testImpactPenalty;
+  let structuralBoost = 0;
+  if (profileId === "impact-analysis") {
+    const isRest = hasRole(hit, "REST_CONTROLLER") || hasRole(hit, "REST_ENDPOINT");
+    const isServiceLike = /service$/i.test(hit.fqn) || hasRole(hit, "SPRING_BEAN");
+    const isMapper =
+      hasRole(hit, "REPOSITORY") &&
+      (/\bmapper$/i.test(hit.fqn) || /\bmapper\b/i.test(fqnLower));
+    if (isRest) structuralBoost += 0.12;
+    if (isServiceLike) structuralBoost += 0.08;
+    if (isMapper) structuralBoost += 0.08;
+  }
+
+  return base + bonus + impactBoost + infraBoost + structuralBoost + testImpactPenalty;
 }
 
 function detectInfraCategory(hit: AnnotatedHit): "HTTP" | "MQ" | "DB" | null {

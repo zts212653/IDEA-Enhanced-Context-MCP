@@ -101,29 +101,34 @@ public class WechatPaymentService implements PaymentService {
 
 ## 4. MCP 工具链调用顺序（示例）
 
+> 约定：所有调用默认过滤测试；如有多仓 PSI，可传 `psiCachePath`。
+
 1) 识别入口角色  
 `explain_symbol_behavior("com.example.orders.OrderController#createOrder")`  
-预期：roles = REST_CONTROLLER + HTTP_HANDLER，isSpringBean=true，isReactiveHandler=false。
+预期：roles = REST_CONTROLLER + HTTP_HANDLER，isSpringBean=true，isReactiveHandler=false；notes 中提示“直接调用 OrderService#createOrder”。
 
-2) 展开入口的出边（Service）  
+2) 展开入口 → Service  
 `analyze_callees_of_method("com.example.orders.OrderController#createOrder")`  
-预期：`callees` 含 `OrderService#createOrder`（category: UNKNOWN/FRAMEWORK），source=calls。
+预期：`callees` 含 `OrderService#createOrder`，category=FRAMEWORK/UNKNOWN，source=calls。
 
 3) 展开 Service → DB/支付/MQ  
 `analyze_callees_of_method("com.example.orders.OrderService#createOrder")`  
 预期：
   - `OrderMapper#insertOrder`（category: DB）
   - `PaymentService#charge`（category: UNKNOWN，implementations 列出 Alipay/Wechat）
-  - `RabbitTemplate#convertAndSend`（category: MQ）
+  - `RabbitTemplate#convertAndSend`（category: MQ，若 PSI 没有调用边则在 notes 说明 fallback）
 
 4) 多态扩展点处理  
 对 `PaymentService#charge` 的 callee：
   - `implementations`: `AlipayPaymentService#charge`, `WechatPaymentService#charge`
-  - 若 PSI 能读出 @Qualifier 注入，备注“静态推测当前注入 alipayPaymentService，但静态分析仍保留全部实现为潜在影响范围”
-  - 按 callersCount 近似排序，impl 数量会在摘要中显示；moduleSummary 字段提示触达的模块分布
+  - 若 PSI 能读出 @Qualifier/@Primary，备注“静态推测当前注入 alipayPaymentService，其余实现仍计入影响集合”
+  - implementations 会按 callersCount 降序；moduleSummary 提示触达的模块分布。
 
 5) 反向影响面（可选）  
-`analyze_callers_of_method("com.example.orders.OrderService#createOrder")` 查看被谁调（Controller、测试等），用于评估入口层覆盖面。
+`analyze_callers_of_method("com.example.orders.OrderService#createOrder")` 查看被谁调用（Controller、CLI、测试），辅助确认入口覆盖面。
+
+6) 角色/排名（影响分析 Profile，可选）  
+对查询 “修改 OrderService#createOrder 影响什么？”：开启 `preferredLevels=class,method`，profile=impact_analysis 时排序会综合 role + callers/callees + HTTP/MQ/DB 标签，优先给 Controller/Service/Mapper/MQ。
 
 ## 5. Blast Radius 汇总（期望回答结构）
 
