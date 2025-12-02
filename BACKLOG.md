@@ -127,11 +127,14 @@
 
 ### C.1 方法级索引（indexLevel = "method"）
 
-- [ ] 扩展当前 indexing pipeline：
-  - [ ] 从 PSI 导出方法级信息（名称、参数、返回值、所在类、修饰符、调用的其它方法、Javadoc）。
-  - [ ] 生成适配的 embedding 文本（类 + 方法签名 + Javadoc + 调用关系摘要）。
-  - [ ] 写入 Milvus，`indexLevel = "method"`。
-- [ ] 更新 schema & ingest 脚本，让 `indexLevel` 支持 `"method"` 并可按模块/类过滤。
+- [x] 扩展当前 indexing pipeline：
+  - [x] 从 PSI 导出方法级信息（名称、参数、返回值、所在类、修饰符、Javadoc）。
+  - [x] 生成适配的 embedding 文本（类 + 方法签名 + Javadoc），后续可在 C.2/C.4 中继续引入调用关系摘要。
+  - [x] 写入 Milvus，`indexLevel = "method"`，并通过 `index_level` 字段与 `levels` 过滤配合。
+- [x] 更新 schema & ingest 脚本，让 `indexLevel` 支持 `"method"` 并可按模块/类过滤（Python helper 支持 `levels`，Node 侧 `formatRecords` 正确映射到 `kind = "METHOD"`）。
+- [x] C.1 体验验证与文档：
+  - [x] 在完整 Milvus + embedding 环境下，用 Spring Framework 向量库在更复杂查询（不仅是 ConstructorPersonWithSetters）下验证 `milvus-method` 命中和排序质量（详见 `doc/MILESTONE_C_STATUS.md` §2.5）。
+  - [x] 在 `doc/MILESTONE_C_STATUS.md` 中记录方法级索引的验证结果、已知局限与推荐查询脚本，作为 C.1 的权威状态页，并约定后续方法级排序优化在 C.3 中继续推进。
 
 ### C.2 调用关系 / 引用关系建模
 
@@ -172,6 +175,43 @@
     - [x] 返回 `targetMethod/targetClass` + `callers[]`（包含 `classFqn/module/packageName/filePath/isTest`），按 `classFqn` 排序。
     - [ ] 后续可扩展为区分 direct calls 与 referrers，并对调用频次聚合排序。
 - [ ] 将该工具整合进 Wushan / Nuwa 迁移场景的高层 workflow 中（例如在 `doc/wushan-java-showcase.md` 里给出“找出所有调用 WsHttpClient.send 的生产代码”的端到端示例）。
+
+### C.5 向外调用分析（call graph 反向补全）
+
+- [x] 新增 MCP 工具 `analyze_callees_of_method`（PSI class 级聚合）：
+  - 输入：`methodFqn`（例如 `WsHttpClient#send`），可选 `maxResults`。
+  - 行为：
+    - 读取 PSI cache 的 `relations.calls`（class 聚合的 `Class#method`），按去重排序返回。
+    - 没有直接 call edge 时，回退到 `relations.references` 作为粗粒度依赖列表。
+    - 每个 callee 附带粗分类：`DB/HTTP/REDIS/MQ/EVENT/FRAMEWORK/INTERNAL_SERVICE/UNKNOWN`。
+    - 若 callee 是接口，会列出实现类（PSI `implements`）供多态扩展点参考。
+    - 用 `source` 标记结果来源（`calls` 或 `references`），备注中提示“PSI 目前是 class 聚合，没有 per-method 边”。
+- [x] MCP PSI cache 多仓支持：`analyze_callers_of_method` / `analyze_callees_of_method` / `explain_symbol_behavior` 支持 `psiCachePath` 参数，便于在多个仓库的 PSI 缓存之间切换（默认仍读取 `idea-bridge/.idea-bridge/psi-cache.json` 或 `BRIDGE_PSI_CACHE`）。
+- [ ] 将返回格式对齐 `analyze_callers_of_method` 的分组/频次聚合，并在 impact profile 中结合 callersCount/calleesCount 做排序信号。
+- [ ] 补充 WebMVC 电商下单链示例文档 `doc/SCENARIO_orders_impact.md`，覆盖 Controller→Service→Mapper→MQ + 多态 PaymentService 路径。
+
+---
+
+## 6. Milestone R · 模型化 Rerank（减少硬编码，吸收元数据信号）
+
+> 目标：在现有“向量召回 + 规则/元数据”基础上，引入可插拔的 rerank 模型，逐步用模型吸收角色/关系/库标签等信号，减少硬编码、提高多仓泛化。
+
+- [ ] R1 插拔式 rerank 结构
+  - 在 Milvus top-N 之后新增可选 rerank stage（env 开关），输入包含：候选文本、角色、callers/callees 计数、module/repo、HTTP/MQ/DB 分类等元数据。
+  - 支持 provider 配置（RERANK_PROVIDER/RERANK_HOST/RERANK_MODEL），默认关闭以保证兼容。
+  - 先用现成 cross-encoder（如 bge-reranker-large/jina-reranker-v1）验证，不修改现有召回/过滤。
+- [ ] R2 元数据约束与特征
+  - 保留前置过滤：`preferredLevels`、`moduleHint/moduleFilter`、role filters，减少 rerank 负担。
+  - 将角色、callersCount/calleesCount、HTTP/MQ/DB/Repo 标签、测试标记等串入 rerank 输入，降低手写 boost 依赖。
+- [ ] R3 评测回路
+  - 在 petclinic + Spring 场景（含 `doc/SCENARIO_orders_impact.md`）对比：无 rerank（纯 heuristics） vs 启用 rerank（固定模型），记录 Hit@K/NDCG/质量观察。
+  - 确保无 rerank 时行为不变；有 rerank 时看前 5/10 的提升与误报。
+- [ ] R4 专用/微调阶段（可选）
+  - 收集 Spring/WebMVC/AOP/MQ/DB 问法评测集；若收益明显，尝试用这些标注做轻量 LoRA/蒸馏，让模型吸收 call graph/角色/库标签特征。
+  - 考虑多仓隔离：不同 repo 可配置不同 rerank host/model，或在 prompt 中加入 repoName/module 以降低跨仓噪音。
+- [ ] R5 上线策略
+  - 默认关闭，feature flag 控制；监控延迟与失败回退（失败时直接用原有排序）。
+  - 文档：在 `doc/embedding-layer.md`/`doc/SCENARIO_*` 增加“启用 rerank”章节与配置示例。
 
 ---
 

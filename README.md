@@ -20,7 +20,7 @@ BRIDGE_BODY_LIMIT=$((50*1024*1024)) \  # adjust if 413
 npm run dev  # or npm start
 
 # 3) Export PSI in IntelliJ via the plugin (writes to BRIDGE_PSI_CACHE)
-# default cache: idea-bridge/.idea-bridge/psi-cache.json under this repo
+# 默认会按 projectName 写成 .idea-bridge/psi-cache-<project>.json；可用 BRIDGE_PSI_CACHE/BRIDGE_PSI_CACHE_DIR 覆盖
 
 # 4) Ingest into Milvus (chunked, skips zero-norm vectors)
 MILVUS_RESET=1 \
@@ -43,7 +43,7 @@ MAX_CONTEXT_TOKENS=9000 npm run tool:search -- "Which services depend on the dis
 
 ## Key Environment Variables
 
-- **Bridge**: `BRIDGE_PSI_CACHE` (default `idea-bridge/.idea-bridge/psi-cache.json`), `BRIDGE_BODY_LIMIT` (default 50MB), `BRIDGE_PORT`, `BRIDGE_PROJECT_ROOT`.
+- **Bridge**: `BRIDGE_PSI_CACHE` (explicit file) or `BRIDGE_PSI_CACHE_DIR` (dir for per-project caches,默认将 projectName 写成 `psi-cache-<project>.json`); `BRIDGE_BODY_LIMIT` (default 50MB), `BRIDGE_PORT`, `BRIDGE_PROJECT_ROOT`.
 - **Ingest**: `INGEST_LIMIT` (truncate symbols for smoke runs), `INGEST_CHUNK_SIZE` (default 2000 rows per chunk), `MILVUS_RESET=1` (recreate collection), `NODE_OPTIONS="--max-old-space-size=8192"` (large projects), `IEC_EMBED_MODEL` / `OLLAMA_HOST`.
 - **MCP server**: `MILVUS_ADDRESS`, `PREFERRED_LEVELS`, `MAX_CONTEXT_TOKENS`, `MODULE_HINT`, `CI_FIXTURE` (fixture mode).
 
@@ -65,4 +65,3 @@ MAX_CONTEXT_TOKENS=9000 npm run tool:search -- "Which services depend on the dis
 - `idea-bridge`: `npm run dev`, `npm run ingest:milvus`, `npm run index:symbols`.
 - `mcp-server`: `npm run dev`, `npm run tool:search -- "<query>"`, `node scripts/run_eval.mjs --scenarios=...`.
 - Root: `./scripts/run-milestone-b-with-env.sh` (one-touch env + smoke tests).
-

@@ -244,6 +244,18 @@ function buildModuleEntry(repoName: string, module: ModuleGroup): IndexEntry {
 }
 
 function buildClassEntry(symbol: SymbolRecord): IndexEntry {
+  const callersCount = symbol.relations?.calledBy?.length ?? 0;
+  const calleesCount = symbol.relations?.calls?.length ?? 0;
+  const referencesCount = symbol.relations?.references?.length ?? 0;
+  const relationSummary =
+    callersCount || calleesCount || referencesCount
+      ? {
+          callersCount,
+          calleesCount,
+          referencesCount,
+        }
+      : undefined;
+
   const metadata = {
     module: symbol.module,
     modulePath: symbol.modulePath,
@@ -258,6 +270,10 @@ function buildClassEntry(symbol: SymbolRecord): IndexEntry {
     upload: symbol.uploadMeta,
     hierarchy: symbol.hierarchy,
     relations: symbol.relations,
+    callersCount: callersCount || undefined,
+    calleesCount: calleesCount || undefined,
+    referencesCount: referencesCount || undefined,
+    relationSummary,
   };
 
   return {
@@ -376,6 +392,8 @@ async function run() {
         prompt,
         config.embeddingModel,
         config.embeddingHost,
+        config.embeddingProvider,
+        config.embeddingTaskPassage,
       );
     } catch (error) {
       console.warn(

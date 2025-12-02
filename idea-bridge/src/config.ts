@@ -5,11 +5,15 @@ export interface BridgeConfig {
   projectRoot: string;
   port: number;
   psiCachePath: string;
+  psiCacheDir?: string;
   milvusHttpEndpoint: string;
   milvusGrpcAddress: string;
   milvusCollection: string;
   milvusVectorField: string;
   milvusDatabase: string;
+  embeddingProvider: string;
+  embeddingTaskPassage: string;
+  embeddingTaskQuery: string;
   embeddingModel: string;
   embeddingHost: string;
   resetMilvusCollection: boolean;
@@ -35,17 +39,27 @@ export function loadConfig(): BridgeConfig {
 
   const psiCachePath =
     process.env.BRIDGE_PSI_CACHE ?? defaultCachePath;
+  const psiCacheDir = process.env.BRIDGE_PSI_CACHE_DIR
+    ? resolveTilde(process.env.BRIDGE_PSI_CACHE_DIR)
+    : undefined;
 
   return {
     projectRoot: resolveTilde(projectRoot),
     port: Number(process.env.BRIDGE_PORT ?? 63000),
     psiCachePath: resolveTilde(psiCachePath),
+    psiCacheDir,
     milvusHttpEndpoint:
       process.env.MILVUS_HTTP_ENDPOINT ?? "http://127.0.0.1:9091",
     milvusGrpcAddress: process.env.MILVUS_ADDRESS ?? "127.0.0.1:19530",
     milvusCollection: process.env.MILVUS_COLLECTION ?? "idea_symbols",
     milvusVectorField: process.env.MILVUS_VECTOR_FIELD ?? "embedding",
     milvusDatabase: process.env.MILVUS_DATABASE ?? "default",
+    embeddingProvider:
+      process.env.EMBEDDING_PROVIDER?.toLowerCase() ?? "ollama",
+    embeddingTaskPassage:
+      process.env.EMBEDDING_TASK_PASSAGE ?? "retrieval.passage",
+    embeddingTaskQuery:
+      process.env.EMBEDDING_TASK_QUERY ?? "retrieval.query",
     embeddingModel:
       process.env.IEC_EMBED_MODEL ??
       process.env.EMBED_MODEL ??

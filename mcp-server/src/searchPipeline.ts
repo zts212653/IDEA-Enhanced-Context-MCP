@@ -77,6 +77,7 @@ type SearchScenario =
   | "discovery_deps"
   | "entity_endpoints"
   | "entity_impact"
+  | "impact_analysis"
   | "all_beans"
   | null;
 
@@ -507,6 +508,20 @@ const PROFILE_REGISTRY: QueryProfile[] = [
     grouping: "none",
     budgetStrategy: "breadth",
     roleBoosts: { REPOSITORY: 0.2, REST_CONTROLLER: 0.2, DTO: 0.1, TEST: 0.1 },
+  },
+  {
+    id: "impact-analysis",
+    scenario: "impact_analysis",
+    preferredLevels: ["class", "method"],
+    grouping: "none",
+    budgetStrategy: "breadth",
+    roleBoosts: {
+      REST_CONTROLLER: 0.25,
+      REST_ENDPOINT: 0.2,
+      REPOSITORY: 0.15,
+      SPRING_BEAN: 0.05,
+      CONFIG: 0.05,
+    },
   },
   {
     id: "all-beans",
@@ -1481,19 +1496,86 @@ function buildAggregatedModuleHit(
 function applyRoleBoosts(
   hits: AnnotatedHit[],
   boosts?: Partial<Record<Role, number>>,
+  profileId?: string,
 ): AnnotatedHit[] {
   if (!boosts) return hits;
   const scored = [...hits];
-  scored.sort((a, b) => getBoostedScore(b, boosts) - getBoostedScore(a, boosts));
+  scored.sort(
+    (a, b) => getBoostedScore(b, boosts, profileId) - getBoostedScore(a, boosts, profileId),
+  );
   return scored;
 }
 
-function getBoostedScore(hit: AnnotatedHit, boosts: Partial<Record<Role, number>>): number {
-  const base = hit.score ?? 0;
+function getBoostedScore(
+  hit: AnnotatedHit,
+  boosts: Partial<Record<Role, number>>,
+  profileId?: string,
+): number {
+  let base = hit.score ?? 0;
   const bonus = (hit.inferredRoles ?? []).reduce((acc, role) => {
     return Math.max(acc, boosts[role] ?? 0);
   }, 0);
-  return base + bonus;
+  const metadata = (hit.metadata ?? {}) as Record<string, unknown>;
+  const callersCount =
+    typeof metadata.callersCount === "number" ? metadata.callersCount : 0;
+  const calleesCount =
+    typeof metadata.calleesCount === "number" ? metadata.calleesCount : 0;
+
+  // Impact-style boost: heavily-used or central classes score higher.
+  const impactBoost =
+    Math.log1p(Math.max(callersCount, 0)) * 0.04 +
+    Math.log1p(Math.max(calleesCount, 0)) * 0.02;
+
+  let infraBoost = 0;
+  if (profileId === "impact-analysis") {
+    const category = detectInfraCategory(hit);
+    if (category === "HTTP") infraBoost = 0.12;
+    else if (category === "MQ") infraBoost = 0.12;
+    else if (category === "DB") infraBoost = 0.1;
+  }
+
+  // Additional penalty for test symbols in impact-style scenarios.
+  const roles = (hit.inferredRoles ?? []) as Role[];
+  const isTest = roles.includes("TEST");
+  const testImpactPenalty = isTest ? -0.3 : 0;
+
+  return base + bonus + impactBoost + infraBoost + testImpactPenalty;
+}
+
+function detectInfraCategory(hit: AnnotatedHit): "HTTP" | "MQ" | "DB" | null {
+  const fqn = hit.fqn.toLowerCase();
+  const metaText = JSON.stringify(hit.metadata ?? {}).toLowerCase();
+  if (
+    fqn.includes("resttemplate") ||
+    fqn.includes("webclient") ||
+    fqn.includes("restoperations") ||
+    fqn.includes("feign") ||
+    fqn.includes("httpclient") ||
+    metaText.includes("http")
+  ) {
+    return "HTTP";
+  }
+  if (
+    fqn.includes("rabbit") ||
+    fqn.includes("kafka") ||
+    fqn.includes("rocketmq") ||
+    fqn.includes("amqp") ||
+    fqn.includes("jms") ||
+    metaText.includes("mq")
+  ) {
+    return "MQ";
+  }
+  if (
+    hasRole(hit, "REPOSITORY") ||
+    fqn.includes("jdbc") ||
+    fqn.includes("mybatis") ||
+    fqn.includes("jpa") ||
+    fqn.includes("datasource") ||
+    metaText.includes("repository")
+  ) {
+    return "DB";
+  }
+  return null;
 }
 
 function applyBudgetStrategy(
@@ -1581,9 +1663,28 @@ function detectScenario(lower: string): SearchScenario {
     return "entity_endpoints";
   }
   if (
-    (lower.includes("schema") || lower.includes("change") || lower.includes("impact") || lower.includes("affect"))
+    lower.includes("schema") ||
+    lower.includes("change") ||
+    lower.includes("impact") ||
+    lower.includes("affect")
   ) {
     return "entity_impact";
+  }
+  if (
+    lower.includes("what happens if i change") ||
+    lower.includes("change this api") ||
+    lower.includes("breaking change") ||
+    lower.includes("migrate from") ||
+    lower.includes("migrate to") ||
+    lower.includes("migration") ||
+    lower.includes("deprecated") ||
+    lower.includes("deprecate") ||
+    lower.includes("replace") ||
+    lower.includes("wshttpclient.send") ||
+    lower.includes("abstracttransactionstatus.setrollbackonly") ||
+    lower.includes("jdbctemplate.query")
+  ) {
+    return "impact_analysis";
   }
   if (lower.includes("spring bean") || (lower.includes("all") && lower.includes("bean"))) {
     return "all_beans";
@@ -1875,7 +1976,7 @@ export function createSearchPipeline({
       entityHint: strategy.entityHint,
       moduleHint: strategy.moduleHint ?? args.moduleHint ?? null,
     });
-    const rankedHits = applyRoleBoosts(scenarioHits, profile.roleBoosts);
+    const rankedHits = applyRoleBoosts(scenarioHits, profile.roleBoosts, profile.id);
     let budget = applyBudgetStrategy(rankedHits, profile, tokenLimit);
     let fallbackUsed = false;
 

@@ -4,6 +4,337 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 
 ---
 
+## 2025-11-25
+
+### Codex Pass 26: Milestone C.1 Method-Level Index Sanity & Callers Tool Check
+
+**Session Context**: Continued Milestone C work after `milestone-c` branch docs update. Goal was to (1) run a light environment/data sanity check, and (2) push C.1 forward by confirming method-level index wiring and documenting current status, without changing core behavior.
+
+**Files Changed**:
+- `doc/MILESTONE_C_STATUS.md`
+- `BACKLOG.md`
+
+**What**:
+- Added `doc/MILESTONE_C_STATUS.md` to summarize the current status of Milestone C from this pass, with a focus on:
+  - Static wiring of the method-level index (PSI exporter → bridge ingest → Milvus schema → MCP search pipeline).
+  - Evidence from existing JSON fixtures under `tmp/` that `indexLevel = "method"` rows are present and surfaced by the MCP server.
+  - Sandbox limitations in this environment (Milvus and embedding host unreachable) and a concrete verification loop for future agents in a full environment.
+  - A quick re-check of `analyze_callers_of_method` confirming it returns expected non-test callers for `JdbcTemplate#query` using only the PSI cache.
+- Updated `BACKLOG.md` Milestone C.1 section to:
+  - Mark the indexing pipeline and schema/ingest support for `indexLevel = "method"` as implemented (`[x]`), matching the current code in `PsiCollectors.kt`, `idea-bridge/src/scripts/ingestMilvus.ts`, `idea-bridge/scripts/milvus_query.py`, and `mcp-server/src/milvusClient.ts` / `searchPipeline.ts`.
+  - Add a new checklist item for C.1 “体验验证与文档”，explicitly calling out the need to validate `milvus-method` hits and ranking behavior in a full Milvus + embedding environment and to use `doc/MILESTONE_C_STATUS.md` as the evolving status page.
+
+**Why**:
+- Prior passes had already implemented method-level ingestion and staged search logic, but C.1 remained `[ ]` in `BACKLOG.md` because validation and documentation lagged behind. This pass closes the gap on “what is actually wired today?” while making it explicit that final C.1 sign-off still depends on running real method-level queries against a live Milvus instance.
+- Having a dedicated Milestone C status document mirrors `doc/MILESTONE_B_STATUS.md` and gives future agents a single place to append observations and test results instead of scattering them across chat logs.
+
+**Key Decisions**:
+- Treat C.1 as **plumbing-complete but experience-pending**:
+  - Mark pipeline/schema tasks as complete in the backlog, since the code already generates `indexLevel = "method"` rows and propagates them through the MCP server.
+  - Keep a separate unchecked “体验验证与文档” subtask to prevent premature milestone closure until method-level ranking quality is evaluated on real queries.
+- Avoid modifying core ingestion/search code in this pass:
+  - Environment cannot reach Milvus or the embedding host, so any behavioral changes would be hard to validate.
+  - Instead, focus on documenting existing behavior and outlining reproducible steps for future verification.
+
+**Testing**:
+- Environment sanity:
+  - Verified that `.venv` exists and `pymilvus` is importable when the venv is activated, but Milvus at `127.0.0.1:19530` is unreachable in this harness (`MilvusException` on connect).
+  - Confirmed that `npm run tool:search` executes and falls back cleanly, but returns only fallback results for AOP queries due to Milvus and embedding host connectivity issues.
+- Callers tool:
+  - Used a small MCP client snippet (similar to `scripts/run-mcp-search.mjs`) to call `analyze_callers_of_method` for `JdbcTemplate#query` and confirmed reasonable non-test callers from Spring Framework PSI.
+- No ingestion or Milvus-backed method-level queries were re-run in this sandbox; instead, this pass relied on existing JSON fixtures under `tmp/` for evidence.
+
+**Next Steps**:
+- In a full environment, follow the verification loop in `doc/MILESTONE_C_STATUS.md` §2.4:
+  - Re-ingest Spring Framework into Milvus with method-level entries.
+  - Run a set of method-heavy queries (`PREFERRED_LEVELS=method`) and capture new `tmp/c1-method-*.json` outputs.
+  - Evaluate how often `milvus-method` hits appear and how useful they are for real impact/migration questions.
+- Once satisfied with semantics, update `BACKLOG.md` to mark the C.1 “体验验证与文档” checklist as complete and (optionally) expand `doc/MILESTONE_C_STATUS.md` with concrete before/after ranking examples.
+
+---
+
+### Codex Pass 27: Start Milestone C.2 Callers/Callees Metadata in Milvus
+
+**Session Context**: After confirming in a real Milvus + embedding environment that method-level indexing works (especially for AOP-style queries), the focus shifted to Milestone C.2: beginning to surface call graph information in Milvus metadata so it can later be used by Impact/Migration ranking profiles.
+
+**Files Changed**:
+- `idea-bridge/src/scripts/ingestMilvus.ts`
+- `doc/MILESTONE_C_STATUS.md`
+- `BACKLOG.md`
+
+**What**:
+- **Ingestion Enrichment (C.2 groundwork)**:
+  - Updated `buildClassEntry` in `idea-bridge/src/scripts/ingestMilvus.ts` to compute simple per-class call graph counts from existing PSI relations:
+    - `callersCount = symbol.relations?.calledBy?.length ?? 0`
+    - `calleesCount = symbol.relations?.calls?.length ?? 0`
+    - `referencesCount = symbol.relations?.references?.length ?? 0`
+  - These counts are now written into the Milvus row metadata for each class-level index entry as:
+    - `callersCount`, `calleesCount`, `referencesCount`
+    - `relationSummary: { callersCount, calleesCount, referencesCount }` (only when at least one is non-zero).
+  - This builds on the existing module-level `relationSummary` that was already aggregating `calls/calledBy/references` across classes in a module; now each class row also carries its own local summary and counts, ready for use by ranking logic.
+- **Documentation and Backlog Alignment**:
+  - `doc/MILESTONE_C_STATUS.md`: Clarified that the initial sandbox pass could not reach Milvus, then added a “2.5 Full-Environment Check” section summarizing real Milvus-backed queries (AOP, Tx, events, JDBC) and how method-level hits behave.
+  - `BACKLOG.md`: Marked Milestone C.1’s “体验验证与文档” checklist as completed, pointing to `doc/MILESTONE_C_STATUS.md` §2.5 as the canonical record, and kept Milestone C.2’s ranking usage of callers/callees counts as future work.
+
+**Why**:
+- C.2’s first concrete step is to make sure that `callersCount/calleesCount` are actually available in Milvus metadata; without that, later Impact/Migration profiles have nothing to leverage, regardless of how good the call-graph itself is.
+- Computing these counts in the bridge avoids touching the IntelliJ exporter for now (relations are already present there as arrays), keeps the Milvus schema stable, and respects the AGENTS guideline to avoid unnecessary schema churn in `mcp-server/src/types.ts`.
+
+**Key Decisions**:
+- Store call graph counts only when they are non-zero and keep them in `metadata`:
+  - This avoids bloating documents that have no relations while still giving ranking code an easy, uniform shape (`metadata.callersCount`, `metadata.calleesCount`, `metadata.relationSummary.*`) to check.
+  - No changes were made to the MCP `SymbolRecord` TypeScript types; downstream ranking logic can read from `hit.metadata` when we wire up the Impact/Migration profile in C.3.
+- Defer any ranking changes to Milestone C.3:
+  - Even though callers/callees counts are now present in metadata, this pass intentionally did not alter the ranking pipeline to keep behavior stable and make the eventual Impact/Migration profile work a clearly scoped follow-up.
+
+**Testing**:
+- Ran `npm run build` in `idea-bridge/` to ensure the updated ingestion script still type-checks and compiles.
+- Re-ran several Milvus-backed MCP queries in `mcp-server/` with `.venv` activated to confirm that:
+  - Milvus access works end-to-end (`fallbackUsed: false` when expected).
+  - Method-level hits continue to appear for AOP/event scenarios (as previously recorded in `doc/MILESTONE_C_STATUS.md` §2.5).
+  - No regressions or runtime errors were introduced by the metadata changes (search still returns results as before).
+
+**Next Steps**:
+- In a follow-up C.2/C.3 pass:
+  - Teach the ranking pipeline to read `callersCount/calleesCount` from Milvus metadata and use them as signals in an `impact_analysis`/migration-style profile (e.g., boosting symbols with many production callers, penalizing those with only tests).
+  - Extend `doc/MILESTONE_C_STATUS.md` and `SCENARIO_REGRESSION.md` with new regression queries (Tx, JdbcTemplate, events) that explicitly check whether the callers/callees-aware ranking improves these currently weaker scenarios.
+
+### Codex Pass 28: Prototype explain_symbol_behavior Tool for Hidden Spring Behavior
+
+**Session Context**: Building on Milestone C.1/C.2, the user asked to think from the perspective of Codex/Claude using this system on large internal frameworks (wushan/nUwa) and to prototype a tool that can explain *implicit* behavior (Spring beans, call graph, reactive handlers) for a given symbol using PSI data, as a first step toward higher-level “explain behavior” workflows.
+
+**Files Changed**:
+- `mcp-server/src/index.ts`
+
+**What**:
+- **PSI Classification & Behavior Explanation Helper**:
+  - Extended the internal `PsiCacheSymbol` type to reflect more of the PSI exporter payload:
+    - Optional `springInfo`, `annotations`, and `methods` (name/signature/returnType/parameters/annotations/javadoc).
+  - Added `BehaviorClassification` and `BehaviorExplanationResult` types to capture:
+    - Spring bean status (`isSpringBean`, `beanType`, `beanName`).
+    - Inferred roles (CONTROLLER/SERVICE/REPOSITORY/CONFIG) from annotations and Spring info.
+    - `isReactiveHandler` heuristic for methods returning `Mono`/`Flux` or using WebFlux types.
+    - `isTest` based on FQN/package/file path.
+  - Implemented `classifyBehavior(symbol, methodName)`:
+    - Inspects `springInfo` and class-level annotations to infer roles.
+    - When a `methodName` is provided, inspects the corresponding method’s return type and parameter types to flag reactive handlers.
+  - Implemented `explainBehaviorInPsiCache(symbolFqn)`:
+    - Resolves class vs method (`Class` vs `Class#method`), loads the PSI cache, finds the symbol, and applies `classifyBehavior`.
+    - When a method is specified, reuses `analyzeCallersInPsiCache` to get a callers preview (non-test callers only).
+    - Produces a structured explanation with:
+      - `targetSymbol`, `targetClass`, `targetMethod`.
+      - `classification` block.
+      - `callersPreview` (or `null`).
+      - `notes`: a short list of human-readable lines summarizing roles, reactive status, test status, and caller count.
+
+- **New MCP Tool: `explain_symbol_behavior`**:
+  - Registered a new MCP tool:
+    - Name: `explain_symbol_behavior`.
+    - Input:
+      - `symbolFqn: string` (class or `Class#method`), validated via `explainBehaviorInputSchema`.
+    - Output:
+      - Mirrors `BehaviorExplanationResult`: `targetSymbol`, `targetClass`, `targetMethod`, `classification`, `callersPreview`, `notes`.
+  - The tool returns both:
+    - `structuredContent` (for Codex/Claude to programmatically inspect Spring roles, reactive hints, and callers).
+    - A `text` summary (`notes.join("\n")`) suitable for direct display.
+
+**Why**:
+- Real-world wushan/nUwa scenarios will heavily involve implicit behavior: Spring beans, transactional proxies, AOP, events, and WebFlux reactive chains. Human and AI developers both need a way to ask:
+  - “What kind of thing is this symbol (bean, controller, reactive handler, test)?”
+  - “Who calls this method, roughly how big is the blast radius if I change it?”
+  - “Is this a reactive handler where behavior is governed by an operator chain rather than straightforward imperative code?”
+- This pass lays a minimal but concrete foundation for such questions:
+  - It doesn’t yet build full web of behavior or operator chains, but provides a structured, MCP-accessible view over PSI-based Spring metadata and direct callers.
+
+**Testing**:
+- `mcp-server` build:
+  - Ran `npm run build` in `mcp-server/` to ensure TypeScript changes compile cleanly.
+- Manual MCP tool smoke tests:
+  - Called `explain_symbol_behavior` for:
+    - `org.springframework.jdbc.core.JdbcTemplate#query`:
+      - `classification.isReactiveHandler = false`, `isSpringBean = false` (as expected for a core JDBC template method).
+      - `callersPreview.callers` included core callers such as:
+        - `NamedParameterJdbcTemplate`, `SimpleJdbcCall`, `SimpleJdbcInsert`, `DefaultJdbcClient`, etc.
+      - `notes` reported “Direct callers in PSI: 14 class(es) (tests excluded).”
+    - `org.springframework.context.event.SimpleApplicationEventMulticaster#multicastEvent`:
+      - Classification marks it as non-test, non-reactive; callers preview shows one direct caller (the class itself).
+    - `org.springframework.web.reactive.function.server.RouterFunction`:
+      - Treated as a class-only target (no method specified); classification currently does not mark it as reactive (future enhancement could look at method signatures or known WebFlux types more deeply).
+
+**Next Steps**:
+- Iterate on `explain_symbol_behavior` to:
+  - Enrich reactive heuristics (e.g., detect WebFlux handler methods returning `Mono<ServerResponse>` or using `RouterFunction`/`HandlerFunction`), and add event/AOP/transaction hints using annotations and Spring config.
+  - Combine this tool with the existing `analyze_callers_of_method` and `impact_analysis` profile into higher-level workflows like `explain_behavior` and `impact_analysis` tools once Spring-based scenarios are solid, then generalize to wushan/nUwa.
+
+### Codex Pass 29: Semantic Role & Tag Design Contract (Embedding Layer Doc)
+
+**Session Context**: The user asked to make the reasoning about `role` explicit and persistent as a “public contract” so future Codex/Claude agents understand what roles mean across Spring, wushan, Nuwa, and third-party libraries (e.g., Jackson migration scenarios), instead of inferring ad-hoc semantics from code.
+
+**Files Changed**:
+- `doc/embedding-layer.md`
+
+**What**:
+- Added a new section **“Semantic Roles & Tags（跨框架的‘职责标签’设计）”** to `doc/embedding-layer.md` that defines:
+  - The conceptual purpose of `role`: describe a symbol’s **responsibility/position** in the architecture (e.g., entrypoint, handler, dispatcher, entity/repository/DTO), **not** its product name or business domain.
+  - A three-layer labeling scheme:
+    1. **Technical / Architecture Roles** (cross-framework): REST_CONTROLLER / REST_ENDPOINT / ENTITY / REPOSITORY / DTO / SPRING_BEAN / CONFIG / TEST / ENTRYPOINT / DISCOVERY_CLIENT / DISCOVERY_SERVER / OTHER. These are inferred primarily via `semanticRoles.ts` and used directly by MCP ranking/filters.
+    2. **Framework-Specific Roles** (wushan/Nuwa/etc.): future labels like `AUTH_ENTRYPOINT`, `AUTH_TOKEN_ISSUER`, `AUTH_TOKEN_VALIDATOR`, `AUTH_IDP_ADAPTER`, `AUTH_CLIENT_SDK`, etc., expressing internal responsibilities within the framework, not business domains.
+    3. **Domain / Module / Feature Tags**: `metadata.module` / `metadata.domain` / `metadata.featureTags` for things like `wushan-auth`, `wushan-iam`, `sts3`, `sts5`, `jwt`, which describe “where” (product/feature) rather than “what it does”.
+  - How current Spring roles fit into this model:
+    - Technical roles: ENTRYPOINT, DISCOVERY_CLIENT/SERVER, REST_CONTROLLER, REST_ENDPOINT, ENTITY, REPOSITORY, DTO, SPRING_BEAN, CONFIG, TEST, OTHER.
+    - Behavior-oriented tags used by `explain_symbol_behavior`: `REACTIVE_INFRA`, `REACTIVE_HANDLER`, `HTTP_HANDLER`, `EVENT_DISPATCHER`, `EVENT_PUBLISHER`, and future `EVENT_LISTENER`, which help explain implicit behavior and can later be integrated into ranking if needed.
+  - A design for third-party library / Jackson-style migrations:
+    - Introduce cross-library responsibilities such as `LIB_CORE_API`, `LIB_CONFIG`, `LIB_ADAPTER`, `LIB_CLIENT_API`.
+    - Add library metadata fields like `metadata.library` (e.g., `jackson-databind`), `metadata.libraryVersion`, `metadata.artifact`.
+    - Use roles + library metadata + callersCount to answer questions like “where is `ObjectMapper` used?”, “which configs/modules must change when upgrading Jackson?”, and “which services still depend on old JSON components vs the new one”.
+  - Guidelines for future agents:
+    - Use **roles** to express responsibilities (entrypoints/handlers/dispatchers/adapters/client-SDKs).
+    - Use **metadata.module/domain/featureTags** for business domain or product labels.
+    - Use **metadata.library/libraryVersion/artifact** for third-party library usage/version.
+    - Whenever introducing new roles/tags:
+      - Update the doc to describe semantics.
+      - Update `semanticRoles.ts` if the role participates in MCP ranking.
+      - Keep ingest/PSI/MCP output consistent.
+
+**Why**:
+- Codifying this design in a single, authoritative document prevents role/tag semantics from drifting across passes and makes it clear how to extend the scheme for wushan/Nuwa and third-party libraries without creating an unmanageable zoo of ad-hoc labels.
+- It also answers the “is our current tag design enough for Jackson or other JSON library migrations?” question by showing that:
+  - The **structure** (roles + domain/module + library metadata + callersCount) is flexible enough.
+  - Concrete success will still depend on per-framework ingestion heuristics and targeted role definitions (e.g., for auth/http/tx/event/library APIs).
+
+**Next Steps**:
+- Align `semanticRoles.ts` and future ranking profiles with this documented contract when adding new roles, especially for wushan/Nuwa framework roles and third-party library usage.
+- For real migration scenarios (e.g., Jackson version upgrades or custom framework transitions), implement ingestion-time tagging for `library` / `libraryVersion` / `libraryRole` and wire them into an explicit `migration`/`impact_analysis` profile.
+
+### Codex Pass 30: Outgoing call MCP tool (`analyze_callees_of_method`)
+
+**Session Context**: Follow-up to the impact/behavior tooling in C.4—added a forward-call analyzer so we can trace “入口 → 底座 → 外部依赖” chains directly from PSI without Milvus.
+
+**Files Changed**:
+- `mcp-server/src/index.ts`
+- `BACKLOG.md`
+
+**What**:
+- New MCP tool `analyze_callees_of_method`:
+  - Input: `methodFqn` (class#method), optional `maxResults`.
+  - Uses PSI cache `relations.calls` (class-aggregated) to list outgoing `Class#method` targets; when no call edges exist, falls back to `relations.references`.
+  - Each callee includes coarse category tagging (`DB/HTTP/REDIS/MQ/EVENT/FRAMEWORK/INTERNAL_SERVICE/UNKNOWN`) plus `source` (calls vs references) and module/package/file hints when present in PSI.
+  - Notes remind callers that PSI call edges are aggregated at the class level (no per-method edges yet) to set expectations for Spring/WebFlux traces.
+- Backlog C.5 added to track this outward-call tool and a future follow-up to align grouping/frequency aggregation with `analyze_callers_of_method` and impact ranking.
+
+**Why**:
+- Complements `analyze_callers_of_method` and `explain_symbol_behavior` for Spring/impact questions by showing “what this method calls” (DB/HTTP/Redis/MQ/internal) even when Milvus isn’t available.
+- Provides a structured hook to combine outgoing calls with callersCount/calleesCount in later ranking/profile work.
+
+**Testing**:
+- `npm run build` in `mcp-server/` ✅ (TypeScript check for tool wiring).
+- No automated runtime tests added; the change is isolated to MCP tool registration and PSI parsing logic.
+
+**Next Steps**:
+- Run `npm run build` in `mcp-server/` to type-check the new tool.
+- Extend output to aggregate by module/frequency and feed counts into `impact_analysis` profile once Milvus metadata uses callees counts.
+
+---
+
+### Codex Pass 31: Orders impact scenario + callee impls + ranking tweaks
+
+**Session Context**: Documented the e-commerce OrderController→Service→Mapper→MQ scenario, tightened role heuristics, and enriched the outgoing-call tool with interface implementations + impact-friendly boosts.
+
+**Files Changed**:
+- `mcp-server/src/index.ts`
+- `mcp-server/src/semanticRoles.ts`
+- `mcp-server/src/searchPipeline.ts`
+- `BACKLOG.md`
+- `doc/SCENARIO_orders_impact.md`
+
+**What**:
+- `analyze_callees_of_method`: now includes interface implementations (via PSI `hierarchy.interfaces`), per-callee callers/callees counts, module summary, and beanName/beanType hints; polymorphic扩展点会列出全部实现并按 callersCount 排序，summary 展示模块触达情况。
+- Role heuristics: reduced REST_CONTROLLER/DTO/CONFIG/REPOSITORY mislabeling by using simple class-name suffixes (Controller/DTO/Config/Repository/Mapper/Service) instead of broad substring matches.
+- Impact ranking: `impact_analysis` profile adds REPOSITORY boost; additional HTTP/MQ/DB heuristics applied in `getBoostedScore` for impact scenarios,仍沿用 callers/callees 计数和 TEST 惩罚。
+- Tools now accept `psiCachePath` (callers/callees/explain) to switch between multiple PSI caches; default still honors `BRIDGE_PSI_CACHE` / `idea-bridge/.idea-bridge/psi-cache.json`.
+- Backlog: C.5 notes interface-impl listing、多仓 PSI 支持，并保留 TODO 以完善分组/排序信号与 WebMVC orders 场景。
+- New scenario doc `doc/SCENARIO_orders_impact.md`: end-to-end trace (Controller → Service → Mapper/PaymentService/MQ), MCP call steps, polymorphism handling guidance, and blast-radius summary.
+
+**Testing**:
+- `npm run build` in `mcp-server/` ✅
+
+**Next Steps**:
+- Aggregate callee results by module/frequency and connect callersCount/calleesCount into impact ranking.
+- Use `SCENARIO_orders_impact.md` as a regression fixture once corresponding PSI data exists; refine role/boost heuristics after real WebMVC runs.
+
+---
+
+### Codex Pass 34: PSI cache per-project filenames + docs
+
+**What**:
+- Bridge now writes uploads to per-project PSI cache files by default (e.g., `.idea-bridge/psi-cache-<project>.json`), avoiding multi-repo overwrites.
+- Added optional `BRIDGE_PSI_CACHE_DIR`; on startup Bridge looks for the newest `.json` in the configured directory or the default cache directory. `/api/info` reports the active path.
+- Save/load logic derives cache path from `projectName` when present; falls back to a stable default.
+- Docs updated (README, `doc/idea-bridge-vs-not.md`, `doc/mcp-configuration-guide.md`) to reflect per-project naming and envs.
+
+**Files Changed**:
+- `idea-bridge/src/config.ts`
+- `idea-bridge/src/server.ts`
+- `idea-bridge/src/psiDataSource.ts`
+- `doc/idea-bridge-vs-not.md`
+- `doc/mcp-configuration-guide.md`
+- `README.md`
+
+**Testing**:
+- `mcp-server`: `npm run build` ✅ (bridge TS not recompiled in this pass; logic change is small/typed).
+
+**Next Steps**:
+- If needed, add a UI field in the IntelliJ exporter for explicit cache path; current behavior already uses `projectName` to avoid clobbering.
+
+---
+
+### Codex Pass 33: Rerank plan added to BACKLOG
+
+**What**:
+- Added Milestone R to `BACKLOG.md`: a staged plan to introduce a pluggable rerank model on top of current vector + metadata flow.
+  - R1: optional rerank stage (provider/env configurable), using cross-encoder models (bge/jina) after Milvus top-N.
+  - R2: keep metadata filtering (preferredLevels/moduleHint/roles) and feed roles + callers/callees + HTTP/MQ/DB + test signals into rerank input.
+  - R3: compare heuristics vs rerank on petclinic/Spring scenarios (Hit@K/NDCG), fallback safe when rerank is off/unavailable.
+  - R4: optional fine-tune/LoRA with Spring/AOP/WebMVC eval sets; support per-repo config to avoid cross-repo noise.
+  - R5: rollout via feature flag, doc the setup in embedding-layer/SCENARIO docs.
+
+**Why**:
+- We currently rely on heuristic boosts; introducing a model-based reranker with metadata-aware features reduces hardcoding and should improve multi-repo/generalization without breaking existing flows (keep off by default).
+
+**Testing**:
+- Documentation-only update; no code executed.
+
+---
+
+### Codex Pass 32: Jina embedding hook + multi-provider plumbing
+
+**Session Context**: Make embedding configurable beyond Ollama, enable Jina v3 task-specific calls, and provide a lightweight local server instead of Infinity.
+
+**Files Changed**:
+- `idea-bridge/src/config.ts`, `idea-bridge/src/embedding.ts`, `idea-bridge/src/scripts/ingestMilvus.ts`
+- `mcp-server/src/milvusConfig.ts`, `mcp-server/src/milvusClient.ts`
+- `scripts/jina_server.py`
+
+**What**:
+- Embedding provider/env now configurable: `EMBEDDING_PROVIDER` (`ollama` default), `EMBEDDING_TASK_PASSAGE`/`EMBEDDING_TASK_QUERY` (default `retrieval.passage`/`retrieval.query`), `EMBEDDING_MODEL`, `EMBEDDING_HOST`.
+- Jina path posts to `/embed` with `inputs` + `instruction`; Ollama/OpenAI path unchanged (`/api/embeddings` with `prompt`). Ingest uses passage task; Milvus query uses query task.
+- Added lightweight FastAPI server `scripts/jina_server.py` (MPS + FP16) to run Jina v3 locally with task-specific LoRA, avoiding Infinity/gguf.
+
+**Why**:
+- Ollama cannot pass `task`/`instruction`,导致 Jina v3 LoRA 失效；本地需要可切换 provider 并明确区分 passage/query。
+- Provide a simple way to spin up Jina v3 on M4 Max without heavy dependencies.
+
+**Testing**:
+- `mcp-server`: `npm run build` ✅
+- Did not start embedding service in this pass; prior Infinity attempt on global Python hit dependency conflicts, so the recommended path is the lightweight FastAPI server.
+
+**Next Steps**:
+- Wire idea-bridge query path to use query-task when needed (ingest already uses passage).
+- Start `scripts/jina_server.py` under Python 3.11/3.12 with MPS, then ingest petclinic and validate search quality vs Ollama.
+- Keep Ollama/nomic embeddings as fallback; switch provider via env when ready.
+
+---
+
 ## 2025-11-19
 
 ### Antigravity Pass 1: Search Optimization & Automation Fix

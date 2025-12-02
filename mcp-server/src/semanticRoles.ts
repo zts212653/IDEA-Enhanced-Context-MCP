@@ -49,6 +49,7 @@ export function inferRoles(symbol: SymbolRecord): Role[] {
   const roles = new Set<Role>();
   const annotations = collectAnnotations(symbol);
   const lowerFqn = symbol.fqn.toLowerCase();
+  const simpleName = getSimpleName(symbol.fqn);
   const metadataRole = extractMetadataRole(symbol);
   if (metadataRole) {
     roles.add(metadataRole);
@@ -65,19 +66,19 @@ export function inferRoles(symbol: SymbolRecord): Role[] {
   if (/test/i.test(symbol.fqn) || isTestPath(symbol)) {
     roles.add("TEST");
   }
-  if (/repository/i.test(symbol.fqn)) {
+  if (/repository/i.test(simpleName) || /mapper$/i.test(simpleName)) {
     roles.add("REPOSITORY");
   }
-  if (/(controller|resource)/i.test(symbol.fqn)) {
+  if (/controller$/i.test(simpleName)) {
     roles.add("REST_CONTROLLER");
   }
-  if (/(dto|mapper)/i.test(symbol.fqn)) {
+  if (/dto$/i.test(simpleName) || /\bdto\b/i.test(simpleName)) {
     roles.add("DTO");
   }
-  if (/(config)/i.test(symbol.fqn)) {
+  if (/config$/i.test(simpleName)) {
     roles.add("CONFIG");
   }
-  if (/(service)/i.test(symbol.fqn)) {
+  if (/service$/i.test(simpleName)) {
     roles.add("SPRING_BEAN");
   }
   if (/entity|domain|model/i.test(symbol.fqn) || isEntityPath(symbol)) {
@@ -106,6 +107,11 @@ function collectAnnotations(symbol: SymbolRecord): string[] {
     }
   }
   return annotations;
+}
+
+function getSimpleName(fqn: string): string {
+  const parts = fqn.split(".");
+  return parts[parts.length - 1] ?? fqn;
 }
 
 function extractMetadataRole(symbol: SymbolRecord): Role | undefined {

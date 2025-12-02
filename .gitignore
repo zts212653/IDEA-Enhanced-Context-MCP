@@ -9,7 +9,9 @@ dist/
 
 # Python / virtual envs
 __pycache__/
+.venv_3.14/
 .venv/
+.venv_jina/
 venv/
 
 # Runtime artifacts
