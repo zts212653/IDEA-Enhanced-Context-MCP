@@ -106,11 +106,10 @@
 
 **当前全量向量库状态（Spring Framework）**
 
-- Milvus 中 `idea_symbols` 集合已完成全量 ingest（当前约 7.7 万行），包含 module/class/method 层索引。
-- 在 Spring Framework 仓上，使用 `mcp-server/scripts/test-spring-framework.sh` 和 `tmp/search-*.json` 观察到：
-  - AOP 场景（如 "How does Spring AOP create dynamic proxies and apply advice?"）的前几名命中基本落在 `spring-aop` 及相关模块的核心类/方法上（例如 `AspectJAroundAdvice#lazyGetProceedingJoinPoint`）。
-  - BeanPostProcessor / Bean 场景已明显减少测试类主导的情况，但 top1 仍偶尔落在 JMX / MessageSource 等基础设施类上，需要在 C 阶段进一步用结构信息和方法调用关系微调排序。
-  - 事件场景的模块集中在 `spring-context`/`spring-messaging`，但还未稳定锁定到 `DefaultEventListenerFactory` / `EventMulticaster` 等理想目标。Ranking B.1 会在 C 期间结合 call graph 和 roles 继续收紧。
+- Milvus 中有：
+  - `idea_symbols_spring_jina`（1024 维，Jina）——推荐默认，用于 C 阶段验证。
+  - `idea_symbols` / `idea_symbols_spring_nomic`（3584 维，Nomic）——保留对照。
+- 在 Spring Framework 仓上，AOP/Tx/事件/WebFlux/JDBC 问法（Jina 集合）返回核心方法/类；Nomic 集合易漂移到 Beans 配置类，相关性较弱。
 
 后续在 C 阶段的观测/调优：
 
