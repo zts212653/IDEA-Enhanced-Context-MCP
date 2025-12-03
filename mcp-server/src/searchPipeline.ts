@@ -79,6 +79,7 @@ type SearchScenario =
   | "entity_impact"
   | "impact_analysis"
   | "all_beans"
+  | "bean_post_processor"
   | null;
 
 type VisitImpactRole =
@@ -524,6 +525,14 @@ const PROFILE_REGISTRY: QueryProfile[] = [
     },
   },
   {
+    id: "bean-post-processor",
+    scenario: "bean_post_processor",
+    preferredLevels: ["class"],
+    grouping: "none",
+    budgetStrategy: "depth",
+    roleBoosts: { CONFIG: 0.15, SPRING_BEAN: 0.1 },
+  },
+  {
     id: "all-beans",
     scenario: "all_beans",
     preferredLevels: ["class", "module"],
@@ -730,6 +739,14 @@ function specializeScenarioResults(
     if (expanded.length) {
       return expanded;
     }
+  } else if (profileId === "bean-post-processor") {
+    const nonTest = scopedHits.filter(
+      (hit) =>
+        !hasRole(hit, "TEST") &&
+        !/test/i.test(hit.fqn) &&
+        hit.module?.includes("spring-context"),
+    );
+    if (nonTest.length) return nonTest;
   }
   return hits;
 }
@@ -1698,6 +1715,9 @@ function detectScenario(lower: string): SearchScenario {
     lower.includes("jdbctemplate.query")
   ) {
     return "impact_analysis";
+  }
+  if (lower.includes("beanpostprocessor")) {
+    return "bean_post_processor";
   }
   if (lower.includes("spring bean") || (lower.includes("all") && lower.includes("bean"))) {
     return "all_beans";

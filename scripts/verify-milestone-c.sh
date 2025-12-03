@@ -17,6 +17,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="${ROOT}/tmp/milestone-c-tests"
 mkdir -p "${LOG_DIR}"
 
+# Default env for tests (override via env if needed)
+export MILVUS_COLLECTION="${MILVUS_COLLECTION:-idea_symbols_spring_jina}"
+export EMBEDDING_PROVIDER="${EMBEDDING_PROVIDER:-jina}"
+export EMBEDDING_HOST="${EMBEDDING_HOST:-http://127.0.0.1:7997}"
+export EMBEDDING_MODEL="${EMBEDDING_MODEL:-jinaai/jina-embeddings-v3}"
+
 # Test mode
 MODE="${1:-full}"
 
@@ -199,8 +205,11 @@ import json
 import sys
 
 try:
-    with open("${LOG_DIR}/c1.3-method-search.json") as f:
-        result = json.load(f)
+    raw = open("${LOG_DIR}/c1.3-method-search.json").read()
+    start = raw.find("{")
+    if start == -1:
+        raise ValueError("No JSON object found in output")
+    result = json.loads(raw[start:])
 
     stages = result.get("stages", [])
     method_stage = next((s for s in stages if s["name"] == "milvus-method"), None)
@@ -301,12 +310,16 @@ else
   DISABLE_SCHEMA_CHECK=1 \
   npm run tool:search -- "How does Spring AOP create dynamic proxies?" > "${LOG_DIR}/c3.1-aop-ranking.json" 2>&1
 
-  python3 << 'EOF'
+  if python3 << EOF
 import json
 import sys
 
-with open("${LOG_DIR}/c3.1-aop-ranking.json") as f:
-    result = json.load(f)
+raw = open("${LOG_DIR}/c3.1-aop-ranking.json").read()
+start = raw.find("{")
+if start == -1:
+    print("ERROR: No JSON object in c3.1-aop-ranking.json")
+    sys.exit(1)
+result = json.loads(raw[start:])
 
 top5_fqns = [r["fqn"] for r in result["deliveredResults"][:5]]
 
@@ -340,7 +353,7 @@ if test_count > 1:
 sys.exit(0)
 EOF
 
-  if [[ $? -eq 0 ]]; then
+  then
     PASS "AOP ranking quality acceptable"
   else
     FAIL "AOP ranking needs improvement"
@@ -358,12 +371,16 @@ EOF
   DISABLE_SCHEMA_CHECK=1 \
   npm run tool:search -- "Show me BeanPostProcessor implementations" > "${LOG_DIR}/c3.2-bpp-ranking.json" 2>&1
 
-  python3 << 'EOF'
+  if python3 << EOF
 import json
 import sys
 
-with open("${LOG_DIR}/c3.2-bpp-ranking.json") as f:
-    result = json.load(f)
+raw = open("${LOG_DIR}/c3.2-bpp-ranking.json").read()
+start = raw.find("{")
+if start == -1:
+    print("ERROR: No JSON object in c3.2-bpp-ranking.json")
+    sys.exit(1)
+result = json.loads(raw[start:])
 
 top10 = result["deliveredResults"][:10]
 test_count_top3 = sum(1 for r in top10[:3] if "Test" in r["fqn"])
@@ -386,7 +403,7 @@ if test_count_top10 > 3:
 sys.exit(0)
 EOF
 
-  if [[ $? -eq 0 ]]; then
+  then
     PASS "BeanPostProcessor test penalty working"
   else
     FAIL "Too many test classes in BeanPostProcessor results"
@@ -404,12 +421,16 @@ EOF
   DISABLE_SCHEMA_CHECK=1 \
   npm run tool:search -- "How does Spring multicast application events?" > "${LOG_DIR}/c3.3-event-ranking.json" 2>&1
 
-  python3 << 'EOF'
+  if python3 << EOF
 import json
 import sys
 
-with open("${LOG_DIR}/c3.3-event-ranking.json") as f:
-    result = json.load(f)
+raw = open("${LOG_DIR}/c3.3-event-ranking.json").read()
+start = raw.find("{")
+if start == -1:
+    print("ERROR: No JSON object in c3.3-event-ranking.json")
+    sys.exit(1)
+result = json.loads(raw[start:])
 
 top5_fqns = [r["fqn"] for r in result["deliveredResults"][:5]]
 
@@ -435,7 +456,7 @@ if matches < 2:
 sys.exit(0)
 EOF
 
-  if [[ $? -eq 0 ]]; then
+  then
     PASS "Event scenario ranking quality acceptable"
   else
     FAIL "Event ranking needs improvement"

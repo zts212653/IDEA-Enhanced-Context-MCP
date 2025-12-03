@@ -70,6 +70,17 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 - `mcp-server`: `npm run build` ✅
 - `idea-bridge`: `npm run build` ✅
 
+### Codex Pass 37: Milestone C verify script + moduleHint filter + BPP/事件排序修复
+
+**What**:
+- Fixed Milvus recall to respect `moduleHint` (fallback to moduleFilter) in `mcp-server/src/milvusClient.ts`, and added a bean-post-processor profile to drop test hits + small CONFIG/SPRING_BEAN boosts in `searchPipeline.ts`; added scenario detection for beanpostprocessor.
+- `scripts/verify-milestone-c.sh`: defaults to Jina env (`MILVUS_COLLECTION=idea_symbols_spring_jina`, provider/host/model) and robust JSON parsing; runs all Tier2 tests even if earlier ones fail.
+- Ran `scripts/verify-milestone-c.sh --full`: **8/8 PASS** (AOP top5 all proxy classes, BPP tests filtered, event multicast top5 all event infra). Marked C.3 validation checkboxes as done in `BACKLOG.md`. Kept Claude’s `doc/testing/MILESTONE_C_FIX_PLAN.md` as RCA notes.
+
+**Testing**:
+- `mcp-server`: `npm run build` ✅
+- Verify suite: `scripts/verify-milestone-c.sh --full` ✅ (8/8)
+
 **Notes**:
 - Nomic 抽象向量偶发 -Inf 导致 fallback，如需彻底过滤需调整 bridge embedding 逻辑（当前仅 fallback，不跳过行）。
 - Spring Framework 大仓（`idea_symbols` 3584-dim）可用 Jina 环境继续验证 C 阶段排序质量；petclinic 数据过小难观察 DB/MQ 信号。

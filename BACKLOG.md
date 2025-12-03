@@ -153,10 +153,10 @@
   - [x] BeanPostProcessor 场景：提升 `*BeanPostProcessor*` 及相关配置类权重，并对测试类做更强 penalty。
   - [x] 事件场景：提升 `org.springframework.context.event.*`、`*EventListener*`、`*ApplicationEvent*`、`*EventMulticaster*` 等类权重。
 - [x] 更强 TEST 惩罚：在非测试查询中对 `TEST` 角色施加更大的负权重，并在 BeanPostProcessor 场景中进一步压低测试类排序。
-- [ ] 在 Spring Framework 大仓上，用 `scripts/test-spring-framework.sh` 和 eval harness 校验：
-  - [ ] AOP 相关查询的前 3 条结果中至少包含若干生产级 AOP 配置 / 代理类。
-  - [ ] BeanPostProcessor 场景中测试类不再主导前几名结果。
-  - [ ] 事件场景能稳定返回 `DefaultEventListenerFactory` 等核心类。
+- [x] 在 Spring Framework 大仓上，用 `scripts/test-spring-framework.sh` 和 eval harness 校验：
+  - [x] AOP 相关查询的前 3 条结果中至少包含若干生产级 AOP 配置 / 代理类。
+  - [x] BeanPostProcessor 场景中测试类不再主导前几名结果。
+  - [x] 事件场景能稳定返回 `DefaultEventListenerFactory` 等核心类。
 
 ### C.4 MCP 新工具：`analyze_callers_of_method`
 

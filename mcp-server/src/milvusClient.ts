@@ -255,7 +255,7 @@ export function createMilvusSearchClient(): MilvusSearchHandle | undefined {
           vectorField: config.vectorField,
           vector: embedding,
           limit,
-          moduleFilter: args.moduleFilter,
+          moduleFilter: args.moduleFilter ?? args.moduleHint,
           levels: args.preferredLevels ?? ["class", "method"],
           milvusAddress: config.address,
           metricType: config.metricType,
