@@ -4,6 +4,56 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 
 ---
 
+## 2025-12-02
+
+### Claude Code Pass 1: Milestone C Verification Test Suite
+
+**What**:
+- Created comprehensive test plan to verify Codex's Milestone C implementation claims (C.1 method-level index, C.3 Ranking B.1, C.4/C.5 caller/callee analysis)
+- Added executable test harness: `scripts/verify-milestone-c.sh` with two modes:
+  - `--quick`: Tier 1 smoke tests (5 min) - critical path validation
+  - `--full`: Tier 1 + Tier 2 quality tests (15 min) - includes semantic ranking validation
+- Documentation in `doc/testing/`:
+  - `MILESTONE_C_TEST_PLAN.md`: Detailed test design with user-centric "satisfactory" criteria
+  - `VERIFY_MILESTONE_C_README.md`: Quick-start guide with troubleshooting
+  - `CLAUDE_CODE_RESPONSE.md`: Overall strategy and rationale
+
+**Testing Philosophy**:
+- User-centric perspective: "Would Claude Code trust these results when helping users refactor Spring code?"
+- Three-tier validation: Smoke (does it run?) → Quality (is it good?) → Usability (would we use it?)
+- Acceptance thresholds: 100% = accept, 70-99% = conditional, <70% = reject
+- Tests actual MCP consumer needs, not just technical spec compliance
+
+**Test Coverage**:
+- C.1: PSI schema validation, Milvus ingestion, milvus-method stage active, semantic quality
+- C.3: AOP ranking (ProxyFactory in top 5), BeanPostProcessor TEST penalty (0 tests in top 3), Event infrastructure ranking
+- C.4: analyze_callers_of_method smoke test, excludeTest filter validation
+- C.5: analyze_callees_of_method smoke test
+
+**Files Changed**:
+- `scripts/verify-milestone-c.sh` (new, executable)
+- `doc/testing/MILESTONE_C_TEST_PLAN.md` (new)
+- `doc/testing/VERIFY_MILESTONE_C_README.md` (new)
+- `doc/testing/CLAUDE_CODE_RESPONSE.md` (new)
+
+**Why**:
+- Codex claimed multiple Milestone C items as complete with ✅ in BACKLOG.md
+- As the primary MCP consumer (along with Codex), Claude Code needed objective criteria to verify claims
+- Created automated tests that can be re-run to validate current state and detect regressions
+- Established template for future milestone verification
+
+**Next Steps**:
+- Run `./scripts/verify-milestone-c.sh --full` to validate current implementation
+- Review results and update BACKLOG.md accordingly (✅ → ✓ confirmed, or ⚠️ needs work)
+- Use test failures to guide specific improvements if needed
+
+**Notes**:
+- Tests depend on: Python venv with pymilvus, Milvus at 127.0.0.1:19530, PSI cache, Spring Framework collection
+- Exit codes: 0 = accept, 1 = reject, 2 = conditional review needed
+- Logs saved to `tmp/milestone-c-tests/` for debugging
+
+---
+
 ## 2025-12-01
 
 ### Codex Pass 36: Petclinic Jina vs Nomic A/B + Impact Ranking Heuristics
