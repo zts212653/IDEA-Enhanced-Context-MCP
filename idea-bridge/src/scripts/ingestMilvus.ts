@@ -260,12 +260,17 @@ function buildClassEntry(symbol: SymbolRecord): IndexEntry {
     module: symbol.module,
     modulePath: symbol.modulePath,
     package: symbol.packageName,
+    framework: symbol.repoName,
     annotations: truncateArray(symbol.annotations.map((ann) => ann.fqn ?? ann.name)),
     fields: truncateArray(symbol.fields.map((field) => field.name)),
     methods: truncateArray(symbol.methods.map((method) => method.signature)),
     dependencies: symbol.dependencies,
     spring: symbol.springInfo,
     filePath: symbol.relativePath,
+    isTestCode:
+      /\/test\//i.test(symbol.relativePath ?? "") ||
+      /test/i.test(symbol.fqn) ||
+      /test/i.test(symbol.module ?? ""),
     quality: symbol.quality,
     upload: symbol.uploadMeta,
     hierarchy: symbol.hierarchy,
@@ -307,10 +312,15 @@ function buildMethodEntry(symbol: SymbolRecord, method: MethodInfo): IndexEntry 
   const metadata = {
     class: symbol.fqn,
     module: symbol.module,
+    framework: symbol.repoName,
     parameters: method.parameters,
     returnType: method.returnTypeFqn ?? method.returnType,
     annotations: method.annotations?.map((ann) => ann.fqn ?? ann.name),
     visibility: method.visibility,
+    isTestCode:
+      /\/test\//i.test(symbol.relativePath ?? "") ||
+      /test/i.test(symbol.fqn) ||
+      /test/i.test(symbol.module ?? ""),
     callersCount: callersCount || undefined,
     calleesCount: calleesCount || undefined,
     referencesCount: referencesCount || undefined,
