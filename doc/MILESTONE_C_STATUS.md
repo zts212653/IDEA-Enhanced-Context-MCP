@@ -194,6 +194,20 @@ With Docker/Milvus and the embedding endpoint now reachable from this agent, we 
 
 → Based on this full-environment check, Milestone C.1 can be treated as **plumbing-complete and experience-acceptable for AOP scenarios**, with further method-level ranking tweaks deferred to C.3.
 
+### 2.6 Jina vs Nomic A/B (2025-12-02)
+
+**Setup**
+- Jina collection: `idea_symbols_spring_jina` (dim=1024), provider=jina, host `http://127.0.0.1:7997`.
+- Nomic collection: `idea_symbols`/`idea_symbols_spring_nomic` (dim=3584), provider=ollama, model `manutic/nomic-embed-code`.
+- Queries (all with `preferredLevels=class,method` unless noted): AOP proxies, Tx rollback, Event multicast, WebFlux ServerResponse (method-only), JdbcTemplate→RowMapper.
+
+**Findings**
+- Jina: All five queries return on-topic method/class hits (AOP proxy constructors/auto-proxy creators; TX rollback/setRollbackOnly APIs; ApplicationEventMulticaster#multicastEvent; ServerResponse#created; JdbcTemplate/MappingSqlQuery RowMapper paths). No fallback.
+- Nomic: Frequently drifts to generic Spring Beans configuration classes (PropertyAccessor, YAML factories, PointcutComponentDefinition); WebFlux query fell back entirely; AOP/JDBC hits include some relevant items but mixed with off-topic infrastructure.
+
+**Conclusion**
+- For Spring Framework, Jina embeddings are clearly superior and should be the default collection for Milestone C validation and demos. Nomic can remain as a comparison baseline but is not recommended for primary use.
+
 ---
 
 ## 3. C.4 · `analyze_callers_of_method` Sanity Check

@@ -14,6 +14,7 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 - Ranking/roles: refined `semanticRoles.ts` to reduce伪 REST_CONTROLLER/Mapper/Config/DTO 误报（名后缀 + 包名 +注解），added impact-analysis structural boosts in `searchPipeline.ts` (controllers/services/mapper + callers/callees + HTTP/MQ/DB + TEST penalty) to favor WebMVC/影响分析场景。
 - Bridge fixes: `config.ts` now honors `EMBEDDING_MODEL/EMBEDDING_HOST` over Ollama defaults; `ingestMilvus.ts` logs embedding progress (`EMBED_LOG_EVERY`) and provider/model to avoid silent long runs; `scripts/jina_server.py` logs requests and supports nohup logging to `/tmp/jina_server.log` with Jina startup steps added to `doc/mcp-configuration-guide.md`.
 - Follow-up: adjusted bridge host/model precedence for provider=jina (ignore `OLLAMA_HOST` when provider=jina), and fallback embeddings now use provider-appropriate dimensions (1024 for Jina) to avoid 384-dim pollution when upstream fails.
+- Jina vs Nomic A/B (Spring Framework): ran 5 queries (AOP proxies, Tx rollback, events multicast, WebFlux ServerResponse, JdbcTemplate→RowMapper) against `idea_symbols_spring_jina` (1024) vs `idea_symbols`/`idea_symbols_spring_nomic` (3584). Jina returned on-topic method/class hits across all queries; Nomic often drifted to generic Spring Beans config classes or fallback. Documented in `doc/MILESTONE_C_STATUS.md` §2.6; default Spring test script now prefers `MILVUS_COLLECTION=idea_symbols_spring_jina`.
 
 **Testing**:
 - `mcp-server`: `npm run build` ✅

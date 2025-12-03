@@ -194,6 +194,7 @@ SECTION "Spring Framework Test Suite (Large-Scale)"
 export IDEA_BRIDGE_URL="${BRIDGE_URL}"
 export MILVUS_ADDRESS="${MILVUS_ADDRESS:-127.0.0.1:19530}"
 export DISABLE_SCHEMA_CHECK=1
+export MILVUS_COLLECTION="${MILVUS_COLLECTION:-idea_symbols_spring_jina}"
 
 PASSED=0
 FAILED=0
