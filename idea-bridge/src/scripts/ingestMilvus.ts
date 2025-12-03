@@ -292,6 +292,18 @@ function buildClassEntry(symbol: SymbolRecord): IndexEntry {
 }
 
 function buildMethodEntry(symbol: SymbolRecord, method: MethodInfo): IndexEntry {
+  const callersCount = symbol.relations?.calledBy?.length ?? 0;
+  const calleesCount = symbol.relations?.calls?.length ?? 0;
+  const referencesCount = symbol.relations?.references?.length ?? 0;
+  const relationSummary =
+    callersCount || calleesCount || referencesCount
+      ? {
+          callersCount,
+          calleesCount,
+          referencesCount,
+        }
+      : undefined;
+
   const metadata = {
     class: symbol.fqn,
     module: symbol.module,
@@ -299,6 +311,10 @@ function buildMethodEntry(symbol: SymbolRecord, method: MethodInfo): IndexEntry 
     returnType: method.returnTypeFqn ?? method.returnType,
     annotations: method.annotations?.map((ann) => ann.fqn ?? ann.name),
     visibility: method.visibility,
+    callersCount: callersCount || undefined,
+    calleesCount: calleesCount || undefined,
+    referencesCount: referencesCount || undefined,
+    relationSummary,
   };
 
   const embeddingText = [

@@ -461,6 +461,76 @@ EOF
   else
     FAIL "Event ranking needs improvement"
   fi
+
+  # ---------------------------------------------------------------------------
+  # Test C.3.4: WebFlux functional handler (ServerResponse)
+  # ---------------------------------------------------------------------------
+  TEST "C.3.4 - WebFlux ServerResponse Location"
+
+  cd "${ROOT}/mcp-server"
+
+  PREFERRED_LEVELS=method \
+  MODULE_HINT=spring-webflux \
+  DISABLE_SCHEMA_CHECK=1 \
+  npm run tool:search -- "Where is ServerResponse created in WebFlux functional endpoints?" > "${LOG_DIR}/c3.4-webflux.json" 2>&1
+
+  if python3 << EOF
+import json, sys
+raw = open("${LOG_DIR}/c3.4-webflux.json").read()
+start = raw.find("{")
+if start == -1:
+    print("ERROR: No JSON object in c3.4-webflux.json"); sys.exit(1)
+data = json.loads(raw[start:])
+top = data.get("deliveredResults", [])[:5]
+matches = [r for r in top if "ServerResponse" in r.get("fqn","")]
+print(f"ServerResponse matches: {len(matches)}/{len(top)}")
+for r in matches[:2]:
+    print("  -", r["fqn"])
+if not matches:
+    print("ERROR: No ServerResponse hits in top results")
+    sys.exit(1)
+sys.exit(0)
+EOF
+  then
+    PASS "WebFlux ServerResponse located"
+  else
+    FAIL "WebFlux functional endpoint ranking needs improvement"
+  fi
+
+  # ---------------------------------------------------------------------------
+  # Test C.3.5: JdbcTemplate RowMapper delegation
+  # ---------------------------------------------------------------------------
+  TEST "C.3.5 - JdbcTemplate -> RowMapper"
+
+  cd "${ROOT}/mcp-server"
+
+  PREFERRED_LEVELS=class,method \
+  MODULE_HINT=spring-jdbc \
+  DISABLE_SCHEMA_CHECK=1 \
+  npm run tool:search -- "How does JdbcTemplate query delegate to RowMapper?" > "${LOG_DIR}/c3.5-jdbc.json" 2>&1
+
+  if python3 << EOF
+import json, sys
+raw = open("${LOG_DIR}/c3.5-jdbc.json").read()
+start = raw.find("{")
+if start == -1:
+    print("ERROR: No JSON object in c3.5-jdbc.json"); sys.exit(1)
+data = json.loads(raw[start:])
+top = data.get("deliveredResults", [])[:5]
+matches = [r for r in top if ("JdbcTemplate" in r.get("fqn","") or "RowMapper" in r.get("fqn",""))]
+print(f"JdbcTemplate/RowMapper matches: {len(matches)}/{len(top)}")
+for r in matches[:3]:
+    print("  -", r["fqn"])
+if len(matches) < 2:
+    print("ERROR: Too few JdbcTemplate/RowMapper hits in top results")
+    sys.exit(1)
+sys.exit(0)
+EOF
+  then
+    PASS "JdbcTemplate RowMapper ranking acceptable"
+  else
+    FAIL "JdbcTemplate RowMapper ranking needs improvement"
+  fi
 fi
 
 # ============================================================================

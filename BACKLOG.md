@@ -140,9 +140,9 @@
 - [x] 在 PSI Exporter 中增加基本调用关系（已在当前 Spring Framework PSI cache 中生效）：
   - [x] 记录类级别的方法调用 FQN 列表（`relations.calls`，形如 `SomeClass#someMethod`）。
   - [x] 基于依赖信息 + 调用目标构建 `relations.references`（引用到的类型列表），可用于粗粒度的影响面估计。
-- [ ] 在 Milvus metadata 中增加：
-  - [ ] `callersCount / calleesCount`（目前只在 PSI cache 中存在，尚未下沉到向量元数据）。
-  - [ ] 简单的 `relationSummary`。
+- [x] 在 Milvus metadata 中增加：
+  - [x] `callersCount / calleesCount`（class & method entries 均包含；method 继承 class 级聚合计数）。
+  - [x] 简单的 `relationSummary`。
 - [ ] 为后续「影响分析」类工具预留字段（比如 `framework = "wushan-java"` / `isTestCode`）。
 
 ### C.3 Ranking B.1（与方法级能力同期完成）

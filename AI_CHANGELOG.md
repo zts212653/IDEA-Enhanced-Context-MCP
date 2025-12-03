@@ -85,6 +85,17 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 - Nomic 抽象向量偶发 -Inf 导致 fallback，如需彻底过滤需调整 bridge embedding 逻辑（当前仅 fallback，不跳过行）。
 - Spring Framework 大仓（`idea_symbols` 3584-dim）可用 Jina 环境继续验证 C 阶段排序质量；petclinic 数据过小难观察 DB/MQ 信号。
 
+### Codex Pass 38: Method metadata relation counts + expanded regression
+
+**What**:
+- Ingest now writes `callersCount/calleesCount/referencesCount` and `relationSummary` into **method-level** metadata (class-level聚合计数下沉到 method rows)，让 Milvus metadata 同时携带 class/method 关系计数供排序使用。
+- `scripts/verify-milestone-c.sh` 增加 WebFlux ServerResponse、JdbcTemplate→RowMapper 场景，默认 Jina 集合 env，JSON 解析健壮。
+- BACKLOG C.2 勾选 “callersCount/calleesCount 下沉到 Milvus”。
+
+**Testing**:
+- `idea-bridge`: `npm run build` ✅
+- Verify suite: `scripts/verify-milestone-c.sh --full` ✅ (10/10)
+
 ## 2025-11-25
 
 ### Codex Pass 26: Milestone C.1 Method-Level Index Sanity & Callers Tool Check
