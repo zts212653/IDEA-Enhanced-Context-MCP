@@ -675,7 +675,11 @@ type CallersAnalysisResult = {
     packageName: string;
     filePath: string;
     isTest: boolean;
+    source: "calls" | "references";
   }>;
+  directCallers: number;
+  referrers: number;
+  moduleSummary: Array<{ module: string; count: number }>;
 };
 
 type OutgoingCallCategory =
@@ -756,12 +760,21 @@ function analyzeCallersInPsiCache(input: CallersToolInput): CallersAnalysisResul
   }
   const symbols: PsiCacheSymbol[] = Array.isArray(json?.symbols) ? (json.symbols as PsiCacheSymbol[]) : [];
   if (!symbols.length) {
-    return { targetMethod: methodFqn, targetClass, callers: [] };
+    return {
+      targetMethod: methodFqn,
+      targetClass,
+      callers: [],
+      directCallers: 0,
+      referrers: 0,
+      moduleSummary: [],
+    };
   }
   const excludeTest = input.excludeTest ?? true;
   const maxResults = input.maxResults ?? 200;
   const lowered = methodFqn.toLowerCase();
   const callers: CallersAnalysisResult["callers"] = [];
+  let directCount = 0;
+  let refCount = 0;
 
   // First pass: direct method calls (class#method).
   for (const sym of symbols) {
@@ -777,7 +790,9 @@ function analyzeCallersInPsiCache(input: CallersToolInput): CallersAnalysisResul
       packageName: sym.packageName,
       filePath: sym.filePath,
       isTest,
+      source: "calls",
     });
+    directCount += 1;
     if (callers.length >= maxResults) break;
   }
 
@@ -799,15 +814,27 @@ function analyzeCallersInPsiCache(input: CallersToolInput): CallersAnalysisResul
         packageName: sym.packageName,
         filePath: sym.filePath,
         isTest,
+        source: "references",
       });
+      refCount += 1;
       if (callers.length >= maxResults) break;
     }
   }
   callers.sort((a, b) => a.classFqn.localeCompare(b.classFqn));
+  const moduleCounts = new Map<string, number>();
+  for (const caller of callers) {
+    const key = caller.module ?? "unknown";
+    moduleCounts.set(key, (moduleCounts.get(key) ?? 0) + 1);
+  }
   return {
     targetMethod: methodFqn,
     targetClass,
     callers,
+    directCallers: directCount,
+    referrers: refCount,
+    moduleSummary: Array.from(moduleCounts.entries())
+      .map(([module, count]) => ({ module, count }))
+      .sort((a, b) => b.count - a.count || a.module.localeCompare(b.module)),
   };
 }
 
@@ -1392,6 +1419,15 @@ server.registerTool(
           packageName: z.string(),
           filePath: z.string(),
           isTest: z.boolean(),
+          source: z.enum(["calls", "references"]),
+        }),
+      ),
+      directCallers: z.number(),
+      referrers: z.number(),
+      moduleSummary: z.array(
+        z.object({
+          module: z.string(),
+          count: z.number(),
         }),
       ),
     }),
@@ -1415,19 +1451,27 @@ server.registerTool(
           targetMethod: parsed.methodFqn,
           targetClass: parsed.methodFqn.split("#")[0] ?? parsed.methodFqn,
           callers: [],
+          directCallers: 0,
+          referrers: 0,
+          moduleSummary: [],
         },
       };
     }
-    const summaryLines = [
-      `Target method: ${analysis.targetMethod} (class: ${analysis.targetClass})`,
-      `Callers (${analysis.callers.length}):`,
-      ...analysis.callers.slice(0, 10).map((caller) =>
-        `- ${caller.classFqn} [module=${caller.module}] ${caller.isTest ? "(TEST)" : ""}`,
-      ),
-      analysis.callers.length > 10
-        ? `… and ${analysis.callers.length - 10} more caller classes.`
-        : "",
-    ].filter((line) => line.length > 0);
+  const summaryLines = [
+    `Target method: ${analysis.targetMethod} (class: ${analysis.targetClass})`,
+    `Callers (${analysis.callers.length}, direct=${analysis.directCallers}, referrers=${analysis.referrers}):`,
+    ...analysis.callers.slice(0, 10).map((caller) =>
+      `- ${caller.classFqn} [module=${caller.module}] ${caller.isTest ? "(TEST)" : ""} source=${caller.source}`,
+    ),
+    analysis.callers.length > 10
+      ? `… and ${analysis.callers.length - 10} more caller classes.`
+      : "",
+    analysis.moduleSummary.length
+      ? `Module summary: ${analysis.moduleSummary
+          .map((m) => `${m.module}:${m.count}`)
+          .join(", ")}`
+      : "",
+  ].filter((line) => line.length > 0);
     return {
       content: [
         {
