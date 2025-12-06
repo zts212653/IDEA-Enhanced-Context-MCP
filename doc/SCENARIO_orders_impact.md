@@ -155,6 +155,12 @@ public class WechatPaymentService implements PaymentService {
   - `analyze_callers_of_method` → 反向调用方（可过滤测试）
 - 将输出与本文件对照，补充缺失的表名、交换机、实现类备注。
 
+## 8. 扩展：直接/间接调用与频次聚合（后续优化思路）
+
+- 对 `analyze_callees_of_method` 返回的 `implementations`/callersCount 可按模块/实现分组，排序时优先高 callersCount 的实现，用于估算多态扩展点的实际触达面。
+- 对 `analyze_callers_of_method` 可区分 direct calls vs. references，并按模块聚合调用频次，便于 impact 报告“哪些模块会受影响、调用频度如何”。
+- 这些聚合信号可下沉到 impact 排序（impact_analysis profile）作为权重：callersCount/calleesCount/infraCategory + TEST 惩罚 + moduleHint 过滤。
+
 ## 7. 限制与待办
 
 - PSI 目前记录的是 **class 级聚合** 的 calls/references，无 per-method 动态调度；需要在显示时注明。

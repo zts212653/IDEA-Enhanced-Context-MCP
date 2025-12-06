@@ -1605,6 +1605,8 @@ function detectInfraCategory(hit: AnnotatedHit): "HTTP" | "MQ" | "DB" | null {
   ) {
     return "DB";
   }
+  if (metaText.includes("mq")) return "MQ";
+  if (metaText.includes("http")) return "HTTP";
   return null;
 }
 
