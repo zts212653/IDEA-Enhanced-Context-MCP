@@ -22,6 +22,7 @@ def connect(address: str):
 def search(payload: dict):
     connect(payload.get("milvusAddress", "127.0.0.1:19530"))
     collection = Collection(payload["collectionName"])
+    collection.load()
 
     params = {"metric_type": payload.get("metricType", "IP"), "params": {}}
     search_params = payload.get("searchParams") or {}

@@ -14,6 +14,29 @@ import type { SymbolRecord } from "./types.js";
 
 const DEFAULT_SCHEMA_VERSION = 2;
 
+function slugify(value?: string | null): string {
+  if (!value) return "default";
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-+|-+$)/g, "")
+    .trim() || "default";
+}
+
+function deriveCachePath(config: ReturnType<typeof loadConfig>, projectName?: string | null) {
+  const baseDir =
+    config.psiCacheDir ??
+    path.dirname(config.psiCachePath);
+  const isDefaultName = path.basename(config.psiCachePath) === "psi-cache.json";
+  if (projectName && baseDir) {
+    return path.join(baseDir, `psi-cache-${slugify(projectName)}.json`);
+  }
+  if (isDefaultName && baseDir) {
+    return path.join(baseDir, "psi-cache-default.json");
+  }
+  return config.psiCachePath;
+}
+
 async function bootstrap() {
   const config = loadConfig();
   const bodyLimit = Number(
@@ -25,6 +48,7 @@ async function bootstrap() {
   });
 
   const initialLoad = await loadInitialSymbols(config, fastify.log);
+  let currentCachePath = initialLoad.cachePath ?? config.psiCachePath;
   let records: SymbolRecord[] = initialLoad.records;
   let dataSource: "psi-cache" | "regex" = initialLoad.source;
   let index = new SymbolIndex(records);
@@ -48,7 +72,7 @@ async function bootstrap() {
     projectRoot: config.projectRoot,
     symbolCount: records.length,
     dataSource,
-    psiCachePath: config.psiCachePath,
+    psiCachePath: currentCachePath,
   }));
 
   fastify.post("/api/psi/upload", async (request, reply) => {
@@ -119,7 +143,8 @@ async function bootstrap() {
 
     replaceRecords(annotated);
     try {
-      await savePsiCache(config.psiCachePath, {
+      currentCachePath = deriveCachePath(config, meta.projectName);
+      await savePsiCache(currentCachePath, {
         schemaVersion: batchResult.uploadMeta.schemaVersion,
         generatedAt:
           batchResult.uploadMeta.generatedAt ?? batchResult.uploadMeta.uploadedAt,

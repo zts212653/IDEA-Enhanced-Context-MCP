@@ -104,42 +104,113 @@
 - [x] `run_eval.mjs` 增加 `--fixtureOnly`/`skipped` 逻辑，避免 CI 因缺少真实 Milvus 而失败。
 - [x] `.github/workflows/mcp-eval.yml` 切换到 fixture-only eval，确保 CI 具备再现性。
 
+**当前全量向量库状态（Spring Framework）**
+
+- Milvus 中有：
+  - `idea_symbols_spring_jina`（1024 维，Jina）——推荐默认，用于 C 阶段验证。
+  - `idea_symbols` / `idea_symbols_spring_nomic`（3584 维，Nomic）——保留对照。
+- 在 Spring Framework 仓上，AOP/Tx/事件/WebFlux/JDBC 问法（Jina 集合）返回核心方法/类；Nomic 集合易漂移到 Beans 配置类，相关性较弱。
+
+后续在 C 阶段的观测/调优：
+
+- 利用 `tmp/search-*.json`（AOP / Bean / BeanPostProcessor / 事件等场景）作为 Ranking B.1 的回归样本，每次调整后重跑 `test-spring-framework.sh`，重点观察：
+  - 前 3 条结果是否更稳定地落在正确模块（`spring-aop`/`spring-context`）和核心类型上。
+  - 测试类在这些场景中的出现频率是否继续下降（除非 query 明确要求 tests）。
+- 方法级索引和调用关系（Milestone C）引入后，优先利用 callers/callees 信息在 Impact/Migration 场景中进一步优化排序，而不是再增加新的 isXxxClass 规则。
+
 ---
 
 ## 3. Milestone C · 方法级索引 & 调用关系（为 Wushan Show Case 做准备）
 
-> 目标：为 `doc/wushan-java-showcase.md` 中那种「找出所有调用 WsHttpClient.send 的生产代码」提供技术基础。
+> 目标：为 `doc/wushan-java-showcase.md` 中那种「找出所有调用 WsHttpClient.send 的生产代码」提供技术基础；同时在 C 期间完成一次 Ranking B.1 优化，减少测试噪声，让 AOP/Bean 场景更贴近真实框架语义。
 
 ### C.1 方法级索引（indexLevel = "method"）
 
-- [ ] 扩展当前 indexing pipeline：
-  - [ ] 从 PSI 导出方法级信息（名称、参数、返回值、所在类、修饰符、调用的其它方法、Javadoc）。
-  - [ ] 生成适配的 embedding 文本（类 + 方法签名 + Javadoc + 调用关系摘要）。
-  - [ ] 写入 Milvus，`indexLevel = "method"`。
-- [ ] 更新 schema & ingest 脚本，让 `indexLevel` 支持 `"method"` 并可按模块/类过滤。
+- [x] 扩展当前 indexing pipeline：
+  - [x] 从 PSI 导出方法级信息（名称、参数、返回值、所在类、修饰符、Javadoc）。
+  - [x] 生成适配的 embedding 文本（类 + 方法签名 + Javadoc），后续可在 C.2/C.4 中继续引入调用关系摘要。
+  - [x] 写入 Milvus，`indexLevel = "method"`，并通过 `index_level` 字段与 `levels` 过滤配合。
+- [x] 更新 schema & ingest 脚本，让 `indexLevel` 支持 `"method"` 并可按模块/类过滤（Python helper 支持 `levels`，Node 侧 `formatRecords` 正确映射到 `kind = "METHOD"`）。
+- [x] C.1 体验验证与文档：
+  - [x] 在完整 Milvus + embedding 环境下，用 Spring Framework 向量库在更复杂查询（不仅是 ConstructorPersonWithSetters）下验证 `milvus-method` 命中和排序质量（详见 `doc/MILESTONE_C_STATUS.md` §2.5）。
+  - [x] 在 `doc/MILESTONE_C_STATUS.md` 中记录方法级索引的验证结果、已知局限与推荐查询脚本，作为 C.1 的权威状态页，并约定后续方法级排序优化在 C.3 中继续推进。
 
 ### C.2 调用关系 / 引用关系建模
 
-- [ ] 在 PSI Exporter 中增加基本调用关系：
-  - [ ] 记录方法调用的 FQN 列表（可简化为字符串数组）。
-  - [ ] 记录「该方法被谁调用」的计数（用于排序）。
-- [ ] 在 Milvus metadata 中增加：
-  - [ ] `callersCount / calleesCount`。
-  - [ ] 简单的 `relationSummary`。
-- [ ] 为后续「影响分析」类工具预留字段（比如 `framework = "wushan-java"` / `isTestCode`）。
+- [x] 在 PSI Exporter 中增加基本调用关系（已在当前 Spring Framework PSI cache 中生效）：
+  - [x] 记录类级别的方法调用 FQN 列表（`relations.calls`，形如 `SomeClass#someMethod`）。
+  - [x] 基于依赖信息 + 调用目标构建 `relations.references`（引用到的类型列表），可用于粗粒度的影响面估计。
+- [x] 在 Milvus metadata 中增加：
+  - [x] `callersCount / calleesCount`（class & method entries 均包含；method 继承 class 级聚合计数）。
+  - [x] 简单的 `relationSummary`。
+- [x] 为后续「影响分析」类工具预留字段（`framework`/`isTestCode` + `moduleSummary` 聚合 + `library`/`libraryRole` 标签）。
 
-### C.3 MCP 新工具：`analyze_callers_of_method`
+### C.3 Ranking B.1（与方法级能力同期完成）
 
-- [ ] 新增 MCP 工具：
+- [x] 在 `rankSymbols` 中基于 query tokens + roles + package/fqn 添加轻量语义打分：
+  - [x] AOP/proxy 场景：提升 `org.springframework.aop.*` 包中的 `*ProxyFactory*`、`*AopProxy*`、`*Advisor*` 等核心类权重。
+  - [x] Bean 扫描 / 注册场景：提升 `*BeanDefinitionScanner*`、`ClassPath*Scanning*`、`ComponentScan` 等类权重，并对 `SPRING_BEAN/CONFIG` 角色做小幅 boost。
+  - [x] BeanPostProcessor 场景：提升 `*BeanPostProcessor*` 及相关配置类权重，并对测试类做更强 penalty。
+  - [x] 事件场景：提升 `org.springframework.context.event.*`、`*EventListener*`、`*ApplicationEvent*`、`*EventMulticaster*` 等类权重。
+- [x] 更强 TEST 惩罚：在非测试查询中对 `TEST` 角色施加更大的负权重，并在 BeanPostProcessor 场景中进一步压低测试类排序。
+- [x] 在 Spring Framework 大仓上，用 `scripts/test-spring-framework.sh` 和 eval harness 校验：
+  - [x] AOP 相关查询的前 3 条结果中至少包含若干生产级 AOP 配置 / 代理类。
+  - [x] BeanPostProcessor 场景中测试类不再主导前几名结果。
+  - [x] 事件场景能稳定返回 `DefaultEventListenerFactory` 等核心类。
+
+### C.4 MCP 新工具：`analyze_callers_of_method`
+
+- [x] 新增 MCP 工具：
   - 输入：
-    - [ ] `methodFqn: string`（例如 `com.company.ws.WsHttpClient.send`）
-    - [ ] `filters?: { excludeTest?: boolean; framework?: string }`
-  - 行为：
-    - [ ] 在 `indexLevel = "method"` 中检索调用该方法的所有方法/类。
-    - [ ] 结合 `module` / `framework` / `isTestCode` 做过滤。
+    - [x] `methodFqn: string`（例如 `org.springframework.jdbc.core.JdbcTemplate#query`）。
+    - [x] `excludeTest?: boolean`（默认 `true`，过滤掉测试类调用方）。
+    - [x] `maxResults?: number`（默认 `200`，上限 `500`）。
+  - 行为（当前实现）：
+    - [x] 直接从 PSI cache（`BRIDGE_PSI_CACHE` 或默认 `idea-bridge/.idea-bridge/psi-cache.json`）读取 `symbols[].relations`，不依赖 Milvus。
+    - [x] 第一轮基于 `relations.calls` 查找直接调用目标 `class#method` 的类（class 级别聚合）。
+    - [x] 若没有直接调用，则回退到 `relations.references`，视作“引用该类型的类”，构建粗粒度影响面。
+    - [x] 支持 `excludeTest` 过滤掉 `fqn/filePath` 中包含 `test` 的类，适配生产级影响分析场景。
   - 输出：
-    - [ ] 对调用者按「在生产代码中」「调用频次」「所属服务」排序的列表。
-- [ ] 这是 `wushan-java-showcase` 场景 1 的技术前置条件。
+    - [x] 返回 `targetMethod/targetClass` + `callers[]`（包含 `classFqn/module/packageName/filePath/isTest`），按 `classFqn` 排序。
+    - [ ] 后续可扩展为区分 direct calls 与 referrers，并对调用频次聚合排序。
+- [ ] 将该工具整合进 Wushan / Nuwa 迁移场景的高层 workflow 中（例如在 `doc/wushan-java-showcase.md` 里给出“找出所有调用 WsHttpClient.send 的生产代码”的端到端示例）。
+
+### C.5 向外调用分析（call graph 反向补全）
+
+- [x] 新增 MCP 工具 `analyze_callees_of_method`（PSI class 级聚合）：
+  - 输入：`methodFqn`（例如 `WsHttpClient#send`），可选 `maxResults`。
+  - 行为：
+    - 读取 PSI cache 的 `relations.calls`（class 聚合的 `Class#method`），按去重排序返回。
+    - 没有直接 call edge 时，回退到 `relations.references` 作为粗粒度依赖列表。
+    - 每个 callee 附带粗分类：`DB/HTTP/REDIS/MQ/EVENT/FRAMEWORK/INTERNAL_SERVICE/UNKNOWN`。
+    - 若 callee 是接口，会列出实现类（PSI `implements`）供多态扩展点参考。
+    - 用 `source` 标记结果来源（`calls` 或 `references`），备注中提示“PSI 目前是 class 聚合，没有 per-method 边”。
+- [x] MCP PSI cache 多仓支持：`analyze_callers_of_method` / `analyze_callees_of_method` / `explain_symbol_behavior` 支持 `psiCachePath` 参数，便于在多个仓库的 PSI 缓存之间切换（默认仍读取 `idea-bridge/.idea-bridge/psi-cache.json` 或 `BRIDGE_PSI_CACHE`）。
+- [x] 将返回格式对齐 `analyze_callers_of_method` 的分组/频次聚合，并在 impact profile 中结合 callersCount/calleesCount + moduleSummary 做排序信号。
+- [ ] 补充 WebMVC 电商下单链示例文档 `doc/SCENARIO_orders_impact.md`，覆盖 Controller→Service→Mapper→MQ + 多态 PaymentService 路径。
+
+---
+
+## 6. Milestone R · 模型化 Rerank（减少硬编码，吸收元数据信号）
+
+> 目标：在现有“向量召回 + 规则/元数据”基础上，引入可插拔的 rerank 模型，逐步用模型吸收角色/关系/库标签等信号，减少硬编码、提高多仓泛化。
+
+- [ ] R1 插拔式 rerank 结构
+  - 在 Milvus top-N 之后新增可选 rerank stage（env 开关），输入包含：候选文本、角色、callers/callees 计数、module/repo、HTTP/MQ/DB 分类等元数据。
+  - 支持 provider 配置（RERANK_PROVIDER/RERANK_HOST/RERANK_MODEL），默认关闭以保证兼容。
+  - 先用现成 cross-encoder（如 bge-reranker-large/jina-reranker-v1）验证，不修改现有召回/过滤。
+- [ ] R2 元数据约束与特征
+  - 保留前置过滤：`preferredLevels`、`moduleHint/moduleFilter`、role filters，减少 rerank 负担。
+  - 将角色、callersCount/calleesCount、HTTP/MQ/DB/Repo 标签、测试标记等串入 rerank 输入，降低手写 boost 依赖。
+- [ ] R3 评测回路
+  - 在 petclinic + Spring 场景（含 `doc/SCENARIO_orders_impact.md`）对比：无 rerank（纯 heuristics） vs 启用 rerank（固定模型），记录 Hit@K/NDCG/质量观察。
+  - 确保无 rerank 时行为不变；有 rerank 时看前 5/10 的提升与误报。
+- [ ] R4 专用/微调阶段（可选）
+  - 收集 Spring/WebMVC/AOP/MQ/DB 问法评测集；若收益明显，尝试用这些标注做轻量 LoRA/蒸馏，让模型吸收 call graph/角色/库标签特征。
+  - 考虑多仓隔离：不同 repo 可配置不同 rerank host/model，或在 prompt 中加入 repoName/module 以降低跨仓噪音。
+- [ ] R5 上线策略
+  - 默认关闭，feature flag 控制；监控延迟与失败回退（失败时直接用原有排序）。
+  - 文档：在 `doc/embedding-layer.md`/`doc/SCENARIO_*` 增加“启用 rerank”章节与配置示例。
 
 ---
 

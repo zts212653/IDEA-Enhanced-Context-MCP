@@ -38,21 +38,21 @@ type StagePreference = "module" | "class" | "method";
 
 type FilterSpec =
   | {
-      type: "role";
-      roles: Role[];
-      match?: "any" | "all";
-      optional?: boolean;
-    }
+    type: "role";
+    roles: Role[];
+    match?: "any" | "all";
+    optional?: boolean;
+  }
   | {
-      type: "module";
-      pattern: RegExp;
-      optional?: boolean;
-    }
+    type: "module";
+    pattern: RegExp;
+    optional?: boolean;
+  }
   | {
-      type: "text";
-      pattern: RegExp;
-      optional?: boolean;
-    };
+    type: "text";
+    pattern: RegExp;
+    optional?: boolean;
+  };
 
 type ResultGrouping = "none" | "byModule" | "byRole";
 type BudgetStrategy = "depth" | "breadth";
@@ -77,7 +77,9 @@ type SearchScenario =
   | "discovery_deps"
   | "entity_endpoints"
   | "entity_impact"
+  | "impact_analysis"
   | "all_beans"
+  | "bean_post_processor"
   | null;
 
 type VisitImpactRole =
@@ -141,8 +143,8 @@ export function rankSymbols(
     typeof args.minTokenMatch === "number"
       ? args.minTokenMatch
       : tokens.length >= 4
-      ? 2
-      : 1;
+        ? 2
+        : 1;
 
   return symbols
     .filter((symbol) => {
@@ -153,10 +155,10 @@ export function rankSymbols(
             ? 1
             : 0
           : tokens.reduce(
-              (count, token) =>
-                haystack.includes(token) ? count + 1 : count,
-              0,
-            );
+            (count, token) =>
+              haystack.includes(token) ? count + 1 : count,
+            0,
+          );
       const matchesQuery =
         tokens.length === 0
           ? tokenMatches > 0
@@ -175,9 +177,92 @@ export function rankSymbols(
         (symbol.scoreHints?.lastModifiedDays ?? 90) < 14 ? 0.15 : 0;
       const moduleBoost =
         preferredModule && symbol.module === preferredModule ? 0.1 : 0;
+      const roles = inferRoles(symbol);
+
+      // Penalize test files unless the query specifically asks for tests
+      const isTest =
+        (symbol.metadata?.roles as string[] | undefined)?.includes("TEST") ||
+        roles.includes("TEST");
+      const wantsTests =
+        normalizedQuery.includes("test") || normalizedQuery.includes("tests");
+      const testPenalty = isTest && !wantsTests ? -0.45 : 0;
+
+      // Semantic boosts based on query tokens + roles + FQN/package.
+      const fqnLower = symbol.fqn.toLowerCase();
+      const pkgLower = (symbol.packageName ?? "").toLowerCase();
+      let semanticBoost = 0;
+
+      const hasToken = (needle: string) => tokens.includes(needle.toLowerCase());
+
+      // AOP / proxy-oriented queries
+      if (
+        hasToken("aop") ||
+        hasToken("proxy") ||
+        hasToken("proxies") ||
+        hasToken("advice")
+      ) {
+        if (pkgLower.includes(".aop") || fqnLower.includes(".aop.")) {
+          semanticBoost += 0.3;
+        }
+        if (
+          fqnLower.includes("proxyfactory") ||
+          fqnLower.includes("aopproxy") ||
+          fqnLower.includes("advisor")
+        ) {
+          semanticBoost += 0.25;
+        }
+      }
+
+      // Bean scanning / registration
+      const beanQuery =
+        hasToken("bean") &&
+        (hasToken("scan") || hasToken("scanning") || hasToken("register"));
+      if (beanQuery) {
+        if (
+          fqnLower.includes("beandefinitionscanner") ||
+          fqnLower.includes("classpathbeandefinitionscanner") ||
+          fqnLower.includes("classpathscanningcandidate") ||
+          fqnLower.includes("componentscan")
+        ) {
+          semanticBoost += 0.35;
+        }
+        if (roles.includes("SPRING_BEAN") || roles.includes("CONFIG")) {
+          semanticBoost += 0.1;
+        }
+      }
+
+      // BeanPostProcessor-style impact queries
+      if (hasToken("beanpostprocessor")) {
+        if (fqnLower.includes("beanpostprocessor")) {
+          semanticBoost += 0.35;
+        }
+        if (roles.includes("SPRING_BEAN") || roles.includes("CONFIG")) {
+          semanticBoost += 0.1;
+        }
+        if (isTest && !wantsTests) {
+          semanticBoost -= 0.1;
+        }
+      }
+
+      // Application events
+      if (hasToken("event") || hasToken("events")) {
+        if (pkgLower.includes("context.event")) {
+          semanticBoost += 0.3;
+        }
+        if (
+          fqnLower.includes("eventlistener") ||
+          fqnLower.includes("applicationevent") ||
+          fqnLower.includes("eventmulticaster")
+        ) {
+          semanticBoost += 0.25;
+        }
+      }
+
+      const rawScore =
+        baseScore + refBoost + recencyBoost + moduleBoost + testPenalty + semanticBoost;
       return {
         symbol,
-        score: Math.min(baseScore + refBoost + recencyBoost + moduleBoost, 1),
+        score: Math.max(Math.min(rawScore, 1), 0),
       };
     })
     .sort((a, b) => b.score - a.score)
@@ -328,10 +413,10 @@ function buildStageQuery(
   const parts: string[] = tokens.length
     ? [...tokens]
     : originalQuery
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, " ")
-        .split(/\s+/)
-        .filter(Boolean);
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean);
 
   const pushTokens = (...vals: string[]) => {
     for (const val of vals) {
@@ -424,6 +509,28 @@ const PROFILE_REGISTRY: QueryProfile[] = [
     grouping: "none",
     budgetStrategy: "breadth",
     roleBoosts: { REPOSITORY: 0.2, REST_CONTROLLER: 0.2, DTO: 0.1, TEST: 0.1 },
+  },
+  {
+    id: "impact-analysis",
+    scenario: "impact_analysis",
+    preferredLevels: ["class", "method"],
+    grouping: "none",
+    budgetStrategy: "breadth",
+    roleBoosts: {
+      REST_CONTROLLER: 0.25,
+      REST_ENDPOINT: 0.2,
+      REPOSITORY: 0.15,
+      SPRING_BEAN: 0.05,
+      CONFIG: 0.05,
+    },
+  },
+  {
+    id: "bean-post-processor",
+    scenario: "bean_post_processor",
+    preferredLevels: ["class"],
+    grouping: "none",
+    budgetStrategy: "depth",
+    roleBoosts: { CONFIG: 0.15, SPRING_BEAN: 0.1 },
   },
   {
     id: "all-beans",
@@ -632,6 +739,14 @@ function specializeScenarioResults(
     if (expanded.length) {
       return expanded;
     }
+  } else if (profileId === "bean-post-processor") {
+    const nonTest = scopedHits.filter(
+      (hit) =>
+        !hasRole(hit, "TEST") &&
+        !/test/i.test(hit.fqn) &&
+        hit.module?.includes("spring-context"),
+    );
+    if (nonTest.length) return nonTest;
   }
   return hits;
 }
@@ -1398,19 +1513,148 @@ function buildAggregatedModuleHit(
 function applyRoleBoosts(
   hits: AnnotatedHit[],
   boosts?: Partial<Record<Role, number>>,
+  profileId?: string,
+  options?: { modulePreference?: string | null },
 ): AnnotatedHit[] {
   if (!boosts) return hits;
   const scored = [...hits];
-  scored.sort((a, b) => getBoostedScore(b, boosts) - getBoostedScore(a, boosts));
+  scored.sort(
+    (a, b) =>
+      getBoostedScore(b, boosts, profileId, options) -
+      getBoostedScore(a, boosts, profileId, options),
+  );
   return scored;
 }
 
-function getBoostedScore(hit: AnnotatedHit, boosts: Partial<Record<Role, number>>): number {
-  const base = hit.score ?? 0;
+function extractModuleSpread(summary: unknown): { uniqueModules: number; topCount: number } {
+  if (!summary || typeof summary !== "object") return { uniqueModules: 0, topCount: 0 };
+  const modules = new Map<string, number>();
+  const track = (list?: any) => {
+    if (!Array.isArray(list)) return;
+    for (const item of list) {
+      if (!item) continue;
+      const name = typeof item.module === "string" ? item.module : "unknown";
+      const count = typeof item.count === "number" ? item.count : 1;
+      modules.set(name, (modules.get(name) ?? 0) + count);
+    }
+  };
+
+  const summaryObj = summary as Record<string, unknown>;
+  track(summaryObj.callers);
+  track(summaryObj.callees);
+  if (!modules.size && Array.isArray(summary)) {
+    track(summary);
+  }
+
+  let topCount = 0;
+  for (const count of modules.values()) {
+    if (count > topCount) topCount = count;
+  }
+  return { uniqueModules: modules.size, topCount };
+}
+
+function getBoostedScore(
+  hit: AnnotatedHit,
+  boosts: Partial<Record<Role, number>>,
+  profileId?: string,
+  options?: { modulePreference?: string | null },
+): number {
+  let base = hit.score ?? 0;
   const bonus = (hit.inferredRoles ?? []).reduce((acc, role) => {
     return Math.max(acc, boosts[role] ?? 0);
   }, 0);
-  return base + bonus;
+  const metadata = (hit.metadata ?? {}) as Record<string, unknown>;
+  const callersCount =
+    typeof metadata.callersCount === "number" ? metadata.callersCount : 0;
+  const calleesCount =
+    typeof metadata.calleesCount === "number" ? metadata.calleesCount : 0;
+  const fqnLower = hit.fqn.toLowerCase();
+  const modulePreference = options?.modulePreference
+    ? options.modulePreference.toLowerCase()
+    : null;
+  const moduleSpread = extractModuleSpread(metadata.moduleSummary);
+
+  // Impact-style boost: heavily-used or central classes score higher.
+  const impactBoost =
+    Math.log1p(Math.max(callersCount, 0)) * 0.04 +
+    Math.log1p(Math.max(calleesCount, 0)) * 0.02;
+
+  let infraBoost = 0;
+  if (profileId === "impact-analysis") {
+    const category = detectInfraCategory(hit);
+    if (category === "HTTP") infraBoost = 0.12;
+    else if (category === "MQ") infraBoost = 0.12;
+    else if (category === "DB") infraBoost = 0.1;
+    if (modulePreference && hit.module?.toLowerCase() === modulePreference) {
+      infraBoost += 0.05;
+    }
+  }
+
+  // Additional penalty for test symbols in impact-style scenarios.
+  const roles = (hit.inferredRoles ?? []) as Role[];
+  const isTest = roles.includes("TEST");
+  const testImpactPenalty = isTest ? -0.3 : 0;
+
+  let structuralBoost = 0;
+  if (profileId === "impact-analysis") {
+    const isRest = hasRole(hit, "REST_CONTROLLER") || hasRole(hit, "REST_ENDPOINT");
+    const isServiceLike = /service$/i.test(hit.fqn) || hasRole(hit, "SPRING_BEAN");
+    const isMapper =
+      hasRole(hit, "REPOSITORY") &&
+      (/\bmapper$/i.test(hit.fqn) || /\bmapper\b/i.test(fqnLower));
+    // Prefer production calls: more callers/callees push impact up; deprioritize tests already via penalty.
+    if (isRest) structuralBoost += 0.12;
+    if (isServiceLike) structuralBoost += 0.08;
+    if (isMapper) structuralBoost += 0.08;
+    // Higher callersCount gets additional small lift (beyond log boost) to spread impact signals.
+    structuralBoost += Math.min(callersCount, 20) * 0.005;
+    if (moduleSpread.uniqueModules > 1) {
+      structuralBoost += Math.min(moduleSpread.uniqueModules, 8) * 0.01;
+    }
+    if (moduleSpread.topCount > 0) {
+      structuralBoost += Math.min(moduleSpread.topCount, 12) * 0.003;
+    }
+  }
+
+  return base + bonus + impactBoost + infraBoost + structuralBoost + testImpactPenalty;
+}
+
+function detectInfraCategory(hit: AnnotatedHit): "HTTP" | "MQ" | "DB" | null {
+  const fqn = hit.fqn.toLowerCase();
+  const metaText = JSON.stringify(hit.metadata ?? {}).toLowerCase();
+  if (
+    fqn.includes("resttemplate") ||
+    fqn.includes("webclient") ||
+    fqn.includes("restoperations") ||
+    fqn.includes("feign") ||
+    fqn.includes("httpclient") ||
+    metaText.includes("http")
+  ) {
+    return "HTTP";
+  }
+  if (
+    fqn.includes("rabbit") ||
+    fqn.includes("kafka") ||
+    fqn.includes("rocketmq") ||
+    fqn.includes("amqp") ||
+    fqn.includes("jms") ||
+    metaText.includes("mq")
+  ) {
+    return "MQ";
+  }
+  if (
+    hasRole(hit, "REPOSITORY") ||
+    fqn.includes("jdbc") ||
+    fqn.includes("mybatis") ||
+    fqn.includes("jpa") ||
+    fqn.includes("datasource") ||
+    metaText.includes("repository")
+  ) {
+    return "DB";
+  }
+  if (metaText.includes("mq")) return "MQ";
+  if (metaText.includes("http")) return "HTTP";
+  return null;
 }
 
 function applyBudgetStrategy(
@@ -1498,9 +1742,31 @@ function detectScenario(lower: string): SearchScenario {
     return "entity_endpoints";
   }
   if (
-    (lower.includes("schema") || lower.includes("change") || lower.includes("impact") || lower.includes("affect"))
+    lower.includes("schema") ||
+    lower.includes("change") ||
+    lower.includes("impact") ||
+    lower.includes("affect")
   ) {
     return "entity_impact";
+  }
+  if (
+    lower.includes("what happens if i change") ||
+    lower.includes("change this api") ||
+    lower.includes("breaking change") ||
+    lower.includes("migrate from") ||
+    lower.includes("migrate to") ||
+    lower.includes("migration") ||
+    lower.includes("deprecated") ||
+    lower.includes("deprecate") ||
+    lower.includes("replace") ||
+    lower.includes("wshttpclient.send") ||
+    lower.includes("abstracttransactionstatus.setrollbackonly") ||
+    lower.includes("jdbctemplate.query")
+  ) {
+    return "impact_analysis";
+  }
+  if (lower.includes("beanpostprocessor")) {
+    return "bean_post_processor";
   }
   if (lower.includes("spring bean") || (lower.includes("all") && lower.includes("bean"))) {
     return "all_beans";
@@ -1542,8 +1808,8 @@ function deriveSearchStrategy(args: SearchArguments): SearchStrategy {
     profile === "deep"
       ? ["module", "class", "method"]
       : profile === "targeted"
-      ? ["class"]
-      : ["module", "class"];
+        ? ["class"]
+        : ["module", "class"];
 
   const preferredLevels = Array.from(
     new Set(args.preferredLevels ?? defaultLevels),
@@ -1557,16 +1823,16 @@ function deriveSearchStrategy(args: SearchArguments): SearchStrategy {
       profile === "deep"
         ? "复杂查询或包含调用链/影响分析关键词"
         : profile === "targeted"
-        ? "短查询，仅需精准类/接口结果"
-        : "默认两阶段搜索",
+          ? "短查询，仅需精准类/接口结果"
+          : "默认两阶段搜索",
     preferredLevels,
     moduleLimit: profile === "deep" ? 8 : profile === "targeted" ? 3 : 5,
     classLimit:
       profile === "deep"
         ? Math.min(12, Math.max(args.limit ?? 8, 10))
         : profile === "targeted"
-        ? Math.min(6, args.limit ?? 5)
-        : Math.min(8, args.limit ?? 6),
+          ? Math.min(6, args.limit ?? 5)
+          : Math.min(8, args.limit ?? 6),
     methodLimit: preferredLevels.includes("method") ? 6 : 0,
     moduleFilter: args.moduleFilter ?? null,
     moduleHint: inferModuleHint(args.query, args.moduleHint ?? null),
@@ -1792,7 +2058,9 @@ export function createSearchPipeline({
       entityHint: strategy.entityHint,
       moduleHint: strategy.moduleHint ?? args.moduleHint ?? null,
     });
-    const rankedHits = applyRoleBoosts(scenarioHits, profile.roleBoosts);
+    const rankedHits = applyRoleBoosts(scenarioHits, profile.roleBoosts, profile.id, {
+      modulePreference: strategy.moduleHint ?? args.moduleHint ?? args.moduleFilter ?? null,
+    });
     let budget = applyBudgetStrategy(rankedHits, profile, tokenLimit);
     let fallbackUsed = false;
 

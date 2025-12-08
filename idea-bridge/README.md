@@ -33,6 +33,7 @@ Environment variables:
 | `BRIDGE_PSI_CACHE` | `./.idea-bridge/psi-cache.json` (inside this package) | Where uploaded PSI payloads are persisted. |
 | `BRIDGE_BODY_LIMIT` | `50 * 1024 * 1024` | Maximum bytes accepted per upload request; bump if large batches hit `413 Payload Too Large`. |
 | `BRIDGE_PORT` | `63000` | HTTP port for the bridge server. |
+| `INGEST_MODULE_FILTER` | unset | Comma-separated module names; when set, only symbols whose `module`/`modulePath` match any of these are ingested (useful for module-scoped experiments). |
 | `INGEST_LIMIT` | unset | If set to a positive integer, only the first N symbols are embedded/ingested (useful for smoke tests on huge projects). |
 | `IEC_EMBED_MODEL` | `manutic/nomic-embed-code` | Embedding model name passed to Ollama (also used by `mcp-server`). |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Embedding service base URL. |

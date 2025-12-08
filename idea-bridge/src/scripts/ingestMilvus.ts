@@ -35,6 +35,11 @@ type ModuleGroup = {
   classes: SymbolRecord[];
 };
 
+type ModuleCount = {
+  module: string;
+  count: number;
+};
+
 function adjustVectorLength(vector: number[], dimension: number): number[] {
   if (vector.length === dimension) return vector;
   if (vector.length > dimension) {
@@ -51,10 +56,136 @@ function truncateArray<T>(values: T[], limit = 10) {
   return values.length > limit ? values.slice(0, limit) : values;
 }
 
+function parseCsvEnv(name: string): string[] | undefined {
+  const raw = process.env[name];
+  if (!raw) return undefined;
+  const parts = raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return parts.length ? parts : undefined;
+}
+
+function applyEnvFilters(records: SymbolRecord[]): SymbolRecord[] {
+  let filtered = records;
+  const moduleFilters = parseCsvEnv("INGEST_MODULE_FILTER");
+  if (moduleFilters) {
+    const before = filtered.length;
+    filtered = filtered.filter((record) => {
+      return moduleFilters.some((mod) => {
+        if (!mod) return false;
+        if (record.module === mod) return true;
+        if (record.modulePath && record.modulePath.includes(mod)) return true;
+        return false;
+      });
+    });
+    console.log(
+      `[idea-bridge] INGEST_MODULE_FILTER active: ${moduleFilters.join(",")} records ${before} -> ${filtered.length}`,
+    );
+  }
+  return filtered;
+}
+
 function vectorNorm(vec: number[]): number {
   let sum = 0;
   for (const v of vec) sum += v * v;
   return Math.sqrt(sum);
+}
+
+function buildModuleLookup(records: SymbolRecord[]) {
+  const map = new Map<string, string>();
+  for (const record of records) {
+    if (!record?.fqn) continue;
+    map.set(record.fqn, record.module ?? "unknown");
+  }
+  return map;
+}
+
+function summarizeModules(
+  fqns: string[] | undefined,
+  moduleMap: Map<string, string>,
+): ModuleCount[] {
+  if (!fqns?.length) return [];
+  const counts = new Map<string, number>();
+  for (const fqn of fqns) {
+    if (!fqn) continue;
+    const module = moduleMap.get(fqn) ?? "unknown";
+    counts.set(module, (counts.get(module) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([module, count]) => ({ module, count }))
+    .sort((a, b) => b.count - a.count || a.module.localeCompare(b.module));
+}
+
+function buildModuleSummary(
+  relations: SymbolRecord["relations"],
+  moduleMap: Map<string, string>,
+): { callers?: ModuleCount[]; callees?: ModuleCount[] } | undefined {
+  const callers = summarizeModules(relations?.calledBy, moduleMap);
+  const callees = summarizeModules(relations?.calls, moduleMap);
+  if (!callers.length && !callees.length) return undefined;
+  return {
+    callers: truncateArray(callers, 12),
+    callees: truncateArray(callees, 12),
+  };
+}
+
+function detectLibraryTags(symbol: SymbolRecord): {
+  library?: string;
+  libraryRole?: string;
+} {
+  const pkg = (symbol.packageName ?? "").toLowerCase();
+  const fqn = symbol.fqn.toLowerCase();
+  const module = (symbol.module ?? "").toLowerCase();
+  const has = (needle: string) =>
+    pkg.includes(needle) || fqn.includes(needle) || module.includes(needle);
+
+  let library: string | undefined;
+  let libraryRole: string | undefined;
+
+  if (has("org.springframework")) {
+    library = "spring";
+  }
+  if (has("webflux") || has("web.reactive") || has("webclient")) {
+    library = library ?? "spring-webflux";
+    libraryRole = libraryRole ?? "http-client";
+  } else if (has("resttemplate") || has("rest.operations")) {
+    library = library ?? "spring-web";
+    libraryRole = libraryRole ?? "http-client";
+  } else if (has("feign")) {
+    library = library ?? "feign";
+    libraryRole = libraryRole ?? "http-client";
+  }
+
+  if (has("kafka")) {
+    library = library ?? "kafka";
+    libraryRole = libraryRole ?? "mq-client";
+  } else if (has("rabbit") || has("amqp")) {
+    library = library ?? "rabbitmq";
+    libraryRole = libraryRole ?? "mq-client";
+  }
+
+  if (has("jackson")) {
+    library = library ?? "jackson";
+    libraryRole = libraryRole ?? "json-serde";
+  }
+
+  if (has("jdbc")) {
+    library = library ?? "jdbc";
+    libraryRole = libraryRole ?? "db-client";
+  }
+
+  if (has("reactor.netty") || has("netty")) {
+    library = library ?? "reactor-netty";
+    libraryRole = libraryRole ?? "reactive-transport";
+  }
+
+  if (has("webclient") || has("httpclient") || has("okhttp")) {
+    library = library ?? "http-client";
+    libraryRole = libraryRole ?? "http-client";
+  }
+
+  return { library, libraryRole };
 }
 
 function buildIndexEntries(records: SymbolRecord[]): IndexEntry[] {
@@ -63,15 +194,16 @@ function buildIndexEntries(records: SymbolRecord[]): IndexEntry[] {
   const repoName = records[0].repoName;
   const entries: IndexEntry[] = [];
   const modules = groupByModule(records);
+  const moduleMap = buildModuleLookup(records);
 
   entries.push(buildRepoEntry(repoName, modules, records.length));
   for (const mod of modules.values()) {
     entries.push(buildModuleEntry(repoName, mod));
   }
   for (const symbol of records) {
-    entries.push(buildClassEntry(symbol));
+    entries.push(buildClassEntry(symbol, moduleMap));
     for (const method of symbol.methods) {
-      entries.push(buildMethodEntry(symbol, method));
+      entries.push(buildMethodEntry(symbol, method, moduleMap));
     }
   }
 
@@ -213,21 +345,50 @@ function buildModuleEntry(repoName: string, module: ModuleGroup): IndexEntry {
   };
 }
 
-function buildClassEntry(symbol: SymbolRecord): IndexEntry {
+function buildClassEntry(
+  symbol: SymbolRecord,
+  moduleMap: Map<string, string>,
+): IndexEntry {
+  const callersCount = symbol.relations?.calledBy?.length ?? 0;
+  const calleesCount = symbol.relations?.calls?.length ?? 0;
+  const referencesCount = symbol.relations?.references?.length ?? 0;
+  const relationSummary =
+    callersCount || calleesCount || referencesCount
+      ? {
+          callersCount,
+          calleesCount,
+          referencesCount,
+        }
+      : undefined;
+  const moduleSummary = buildModuleSummary(symbol.relations, moduleMap);
+  const libraryTags = detectLibraryTags(symbol);
+
   const metadata = {
     module: symbol.module,
     modulePath: symbol.modulePath,
     package: symbol.packageName,
+    framework: symbol.repoName,
+    library: libraryTags.library,
+    libraryRole: libraryTags.libraryRole,
     annotations: truncateArray(symbol.annotations.map((ann) => ann.fqn ?? ann.name)),
     fields: truncateArray(symbol.fields.map((field) => field.name)),
     methods: truncateArray(symbol.methods.map((method) => method.signature)),
     dependencies: symbol.dependencies,
     spring: symbol.springInfo,
     filePath: symbol.relativePath,
+    isTestCode:
+      /\/test\//i.test(symbol.relativePath ?? "") ||
+      /test/i.test(symbol.fqn) ||
+      /test/i.test(symbol.module ?? ""),
     quality: symbol.quality,
     upload: symbol.uploadMeta,
     hierarchy: symbol.hierarchy,
     relations: symbol.relations,
+    callersCount: callersCount || undefined,
+    calleesCount: calleesCount || undefined,
+    referencesCount: referencesCount || undefined,
+    relationSummary,
+    moduleSummary,
   };
 
   return {
@@ -245,14 +406,44 @@ function buildClassEntry(symbol: SymbolRecord): IndexEntry {
   };
 }
 
-function buildMethodEntry(symbol: SymbolRecord, method: MethodInfo): IndexEntry {
+function buildMethodEntry(
+  symbol: SymbolRecord,
+  method: MethodInfo,
+  moduleMap: Map<string, string>,
+): IndexEntry {
+  const callersCount = symbol.relations?.calledBy?.length ?? 0;
+  const calleesCount = symbol.relations?.calls?.length ?? 0;
+  const referencesCount = symbol.relations?.references?.length ?? 0;
+  const relationSummary =
+    callersCount || calleesCount || referencesCount
+      ? {
+          callersCount,
+          calleesCount,
+          referencesCount,
+        }
+      : undefined;
+  const moduleSummary = buildModuleSummary(symbol.relations, moduleMap);
+  const libraryTags = detectLibraryTags(symbol);
+
   const metadata = {
     class: symbol.fqn,
     module: symbol.module,
+    framework: symbol.repoName,
+    library: libraryTags.library,
+    libraryRole: libraryTags.libraryRole,
     parameters: method.parameters,
     returnType: method.returnTypeFqn ?? method.returnType,
     annotations: method.annotations?.map((ann) => ann.fqn ?? ann.name),
     visibility: method.visibility,
+    isTestCode:
+      /\/test\//i.test(symbol.relativePath ?? "") ||
+      /test/i.test(symbol.fqn) ||
+      /test/i.test(symbol.module ?? ""),
+    callersCount: callersCount || undefined,
+    calleesCount: calleesCount || undefined,
+    referencesCount: referencesCount || undefined,
+    relationSummary,
+    moduleSummary,
   };
 
   const embeddingText = [
@@ -304,7 +495,7 @@ function prepareRow(
 async function run() {
   const config = loadConfig();
   const initial = await loadInitialSymbols(config);
-  let records = initial.records;
+  let records = applyEnvFilters(initial.records);
   const ingestLimit = process.env.INGEST_LIMIT
     ? Number(process.env.INGEST_LIMIT)
     : undefined;
@@ -329,6 +520,11 @@ async function run() {
   const embeddedRows: Array<ReturnType<typeof prepareRow>> = [];
   let dimension: number | undefined;
   let fallbackCount = 0;
+  const totalEntries = entries.length;
+  const embedLogEvery = Number(process.env.EMBED_LOG_EVERY ?? 200);
+  console.log(
+    `[idea-bridge] Embedding ${totalEntries} entries (provider=${config.embeddingProvider}, model=${config.embeddingModel}, host=${config.embeddingHost})...`,
+  );
   function resizeExistingRows(targetDimension: number) {
     for (const row of embeddedRows) {
       const vector = row[config.milvusVectorField];
@@ -341,18 +537,27 @@ async function run() {
   for (const entry of entries) {
     const prompt = entry.embeddingText;
     let embedding: number[];
+    const desiredDimension =
+      dimension ??
+      (config.embeddingProvider === "jina"
+        ? 1024
+        : config.embeddingProvider === "ollama"
+          ? 768
+          : 768);
     try {
       embedding = await generateEmbedding(
         prompt,
         config.embeddingModel,
         config.embeddingHost,
+        config.embeddingProvider,
+        config.embeddingTaskPassage,
       );
     } catch (error) {
       console.warn(
         `[idea-bridge] embedding failed for ${entry.id}, using fallback`,
         error instanceof Error ? error.message : error,
       );
-      embedding = fallbackEmbedding(prompt, dimension ?? 384);
+      embedding = fallbackEmbedding(prompt, desiredDimension);
       fallbackCount += 1;
     }
 
@@ -373,6 +578,11 @@ async function run() {
     }
 
     embeddedRows.push(prepareRow(entry, embedding, config.milvusVectorField));
+    if (embeddedRows.length % embedLogEvery === 0 || embeddedRows.length === totalEntries) {
+      console.log(
+        `[idea-bridge] embedded ${embeddedRows.length}/${totalEntries} (fallbacks=${fallbackCount})`,
+      );
+    }
   }
 
   if (fallbackCount > 0) {
@@ -448,7 +658,13 @@ async function run() {
     `[idea-bridge] Ingesting ${embeddedRows.length} rows in chunks of ${chunkSize} (dim=${finalDimension})...`,
   );
   for (let start = 0; start < embeddedRows.length; start += chunkSize) {
+    const chunkIndex = Math.floor(start / chunkSize) + 1;
+    const totalChunks = Math.ceil(embeddedRows.length / chunkSize);
     const rows = embeddedRows.slice(start, start + chunkSize);
+    const end = start + rows.length;
+    console.log(
+      `[idea-bridge] chunk ${chunkIndex}/${totalChunks} rows ${start}-${end} (reset=${config.resetMilvusCollection && start === 0})`,
+    );
     const payload = {
       collectionName: config.milvusCollection,
       vectorField: config.milvusVectorField,
@@ -472,6 +688,9 @@ async function run() {
       proc.on("error", (error) => reject(error));
     });
     inserted += rows.length;
+    console.log(
+      `[idea-bridge] inserted so far: ${inserted}/${embeddedRows.length}`,
+    );
   }
 
   await fs.rm(tmpDir, { recursive: true, force: true });

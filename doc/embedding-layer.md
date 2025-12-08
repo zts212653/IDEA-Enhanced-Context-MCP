@@ -518,6 +518,149 @@ if module in HOT_MODULES:
 **核心思想**：
 - 索引可以很大（150GB没问题）
 - 但查询一定要精准过滤
+
+---
+
+## 🧩 Semantic Roles & Tags（跨框架的“职责标签”设计）
+
+> 为什么要给符号贴 `role`？  
+> 因为在 Spring / wushan / Nuwa 这种生态里，真正困难的是：**隐式行为**——bean 注入、AOP、事件、reactive pipeline、底座框架的入口点。  
+> 这些都是“光看一眼源码很难看出职责”的地方，必须先用 IDE / PSI 帮我们做一轮“贴标签 + 统计”，RAG 才有可能给出靠谱的解释和影响面。
+
+### 1. Role 的定位：描述“职责”，不是“产品名”
+
+在这个项目里，`role` 的设计原则是：
+
+- **role 描述“这个符号在系统结构里的职责/位置”**，例如：
+  - 是不是 HTTP 入口？
+  - 是不是 reactive handler？
+  - 是不是事务/事件的派发器？
+  - 是不是实体 / 仓库 / DTO？
+- **role 不等同于业务产品或模块名**：
+  - `wushan-auth` / `wushan-iam` / `coa` / `sts3` / `sts5` / `jwt` 这类，更适合作为 `module` / `domain` / `featureTags` 之类的元数据字段；
+  - role 只回答“在这一块里负责什么”，而不是“属于哪条业务线”。
+
+从架构层来看，我们预期会有三层标签一起工作：
+
+1. **技术 / 架构角色（Technical Roles）**  
+   例如：入口 / 控制器 / 实体 / 仓库 / DTO / Spring bean / 配置等——这些在 Spring、wushan、Nuwa 上都是通用的。
+2. **框架级角色（Framework-Specific Roles）**  
+   例如：wushan 的认证入口、HTTP client 核心、事件总线 dispatcher、client SDK 等——体现“在底座框架内部扮演什么角色”。
+3. **域 / 产品标签（Domain / Module / Feature Tags）**  
+   例如：`module: "wushan-auth"`, `domain: "iam"`, `features: ["sts3", "jwt"]`——描述“在哪个子系统 / 产品 / 功能块”。
+
+后两层通常存放在 `metadata` JSON 里（例如 `metadata.domain`, `metadata.framework`, `metadata.featureTags`），而技术角色这层会参与 MCP 排序（见 `semanticRoles.ts` + `searchPipeline.ts`）。
+
+### 2. 当前实现的技术角色（针对 Spring，但设计为跨框架通用）
+
+这些角色由 `mcp-server/src/semanticRoles.ts` 推断，主要用于 ranking 和过滤：
+
+- `ENTRYPOINT`：应用入口类，例如 `*SpringBootApplication`。
+- `DISCOVERY_CLIENT` / `DISCOVERY_SERVER`：服务发现客户端 / 服务端（Eureka 等）。
+- `REST_CONTROLLER`：REST 控制器类（class 级），通常带 `@RestController` 或 `*Controller` 命名。
+- `REST_ENDPOINT`：具体的 HTTP handler 方法（method 级），带 `@RequestMapping/@GetMapping/...` 等注解。
+- `ENTITY`：领域实体 / 模型类（命名或路径中包含 entity/model/domain）。
+- `REPOSITORY`：仓库 / DAO 类。
+- `DTO`：数据传输对象 / Mapper 类。
+- `SPRING_BEAN`：普通 Spring bean / service（经推断或注解标记）。
+- `CONFIG`：配置类（`@Configuration` 或 *Config 命名）。
+- `TEST`：测试相关代码（FQN/路径中包含 `test`）。
+- `OTHER`：未归类的符号。
+
+这些角色在 impact / 搜索 profile 中会被赋予不同的权重，例如：
+
+- 在 REST 查询中提升 `REST_ENDPOINT` / `REST_CONTROLLER`；  
+- 在实体影响分析中提升 `ENTITY` / `REPOSITORY` / `DTO`；  
+- 在 impact/migration 中降低 `TEST` 的排序。
+
+### 3. 行为标签：Reactive / Event / MVC Handler
+
+除了上面的通用技术角色，我们在 PSI 工具层（`explain_symbol_behavior` MCP 工具）上，还会针对 Spring 的一些隐式行为打额外标签，用于解释和 future ranking：
+
+- Reactive / WebFlux 相关：
+  - `REACTIVE_INFRA`：WebFlux 基础设施，如 `DispatcherHandler`, `HandlerAdapter`, `HandlerMapping`。
+  - `REACTIVE_HANDLER`：返回 `Mono<T>` / `Flux<T>` 或使用 WebFlux 类型的 handler 方法。
+- MVC / HTTP handler：
+  - `HTTP_HANDLER`：带 `@RequestMapping/@GetMapping/...` 等注解的 controller 方法（无论是 MVC 还是 WebFlux 注解风格）。
+- 事件相关：
+  - `EVENT_DISPATCHER`：事件派发器 / Multicaster（如 `ApplicationEventMulticaster#multicastEvent`）。
+  - `EVENT_PUBLISHER`：事件发布接口 / 实现（如 `ApplicationEventPublisher`）。
+  - `EVENT_LISTENER`（未来扩展）：带 `@EventListener` 的 listener 方法。
+
+这些标签目前主要出现在 `explain_symbol_behavior` 的输出中（方便 Codex/Claude 解释符号行为），后续可以逐步统一进 `semanticRoles.ts`，并在 `impact_analysis` 等 profile 中赋予专门的排序规则。
+
+### 4. 框架级角色：以 wushan 为例的未来扩展
+
+当我们迁移到企业内部的 wushan / Nuwa 底座时，除了上面的技术角色，还需要一些 **框架级角色** 来标记“在底座框架内部扮演什么”，“不是哪个业务域”：
+
+举例（以 wushan-auth / wushan-iam 为例）：
+
+- `AUTH_ENTRYPOINT`：统一认证入口（STS/token endpoint 的 HTTP handler）。
+- `AUTH_TOKEN_ISSUER`：签发 token 的核心类 / 方法。
+- `AUTH_TOKEN_VALIDATOR`：验证 token / session 的逻辑。
+- `AUTH_IDP_ADAPTER`：对接外部 IdP（OIDC/SAML 等）的适配器。
+- `AUTH_CLIENT_SDK`：提供给业务服务使用的 auth client 封装。
+
+注意：
+
+- `wushan-auth` / `wushan-iam` / `sts3` / `sts5` / `jwt` 这些更适合出现在：
+  - `metadata.module` / `metadata.domain` / `metadata.featureTags`，例如：
+    - `module: "wushan-auth"`, `domain: "iam"`, `featureTags: ["sts3","jwt"]`；
+  - 而 `AUTH_ENTRYPOINT` / `AUTH_TOKEN_ISSUER` 则是 role（职责）。
+- 在 impact/migration 场景中，我们会综合使用：
+  - 技术角色（入口 / handler / entity 等）；
+  - 框架角色（auth/http/tx/event 等）；
+  - 域 / feature 标签（模块名、功能标签）；
+  - 调用图信号（`callersCount/calleesCount`）；
+  来回答：
+  - “改某个底座 API，会影响哪些服务 / 模块？”
+  - “哪些服务还在用旧版 sts3 client，需要迁到 sts5？”
+
+### 5. 第三方库 / Jackson 迁移之类的场景怎么建模？
+
+以“把一堆杂乱 JSON 组件迁到 Jackson，或者从 Jackson 旧版本迁到新版本”为例，我们希望 RAG 能帮忙回答：
+
+- “全仓库里，哪些地方在用 `ObjectMapper` 或 JSON 反序列化？有哪些典型使用模式？”  
+- “从 jackson-X 换到 jackson-Y，需要改哪些 config / module / custom serializer？”  
+- “哪些服务还依赖旧的 API，需要重点回归？”
+
+在我们的设计里，这可以用 **role + library 元数据** 组合表达：
+
+- Role 侧可以有一些跨库通用的职责：
+  - `LIB_CORE_API`：库的核心对象 / 入口点（例如 `ObjectMapper`, `JsonParser`）。  
+  - `LIB_CONFIG`：配置 / builder / module 注册点（如注册 custom serializer/deserializer 的地方）。  
+  - `LIB_ADAPTER`：业务代码与库之间的适配层（封装序列化逻辑的 helper / util）。  
+  - `LIB_CLIENT_API`：暴露给业务方的高层 API（如封装好默认配置的 client）。
+- 元数据侧需要额外字段：
+  - `metadata.library`: `"jackson-databind"` / `"gson"` / `"fastjson"` 等；  
+  - `metadata.libraryVersion`: `"2.9.10"` / `"2.17.0"`；  
+  - `metadata.artifact`: `"com.fasterxml.jackson.core:jackson-databind"` 等。
+
+这样，在一个“Jackson 升级 / 替换库”场景中：
+
+- RAG 可以先找出 `LIB_CORE_API` + `library=jackson-databind` 的符号（比如 `ObjectMapper` 关键方法）；  
+- 用 `analyze_callers_of_method` + `callersCount` 找出所有依赖这些核心 API 的模块 / 服务；  
+- 进一步用 `LIB_CONFIG` / `LIB_ADAPTER` roles 找到：
+  - 哪些地方注册了 custom serializer/deserializer，需要针对性修改；  
+  - 哪些 adapter class 封装了 Jackson 行为，是集中改动的最佳入口点。
+
+这套建模方案对任何三方库都适用（HTTP client、DB driver、缓存组件等），只需要在 ingest 时把库名 / 版本 / artifact 写入 metadata，并按领域约定好的 role 规则标记几个核心职责即可。
+
+### 6. 给未来 Codex / Claude 的约定
+
+当你（未来的 Codex/Claude）要引入新的 role 或标签时，请遵守以下约定：
+
+- 如果是“这段代码在架构/框架里负责什么” → 加/调整 **role**：
+  - 入口 / handler / dispatcher / adapter / client-sdk / config 等，属于职责层面的东西。
+- 如果是“这段代码属于哪条业务线 / 模块 / 产品 / 功能” → 写在 **metadata.module / metadata.domain / metadata.featureTags**：
+  - 例如 `wushan-auth`, `wushan-iam`, `sts3`, `sts5`, `jwt`。
+- 如果是“用到了哪家第三方库，什么版本” → 写在 **metadata.library / metadata.libraryVersion / metadata.artifact**。
+- 每次引入新的角色/标签：
+  - 更新此文档（或专门的 role 设计文档）说明其语义；  
+  - 更新 `semanticRoles.ts`（如果会参与 MCP 排序）；  
+  - 确保 ingest / PSI exporter / MCP 输出的一致性。
+
+这样，后续无论是 Spring、wushan、Nuwa 还是 Jackson 迁移场景，我们都可以在一套稳定的“职责标签（roles）+ 域标签（domain/module）+ 库标签（library）+ 调用图信号（callersCount/calleesCount）”之上继续做语义级别的针对性优化，而不会让标签体系越贴越乱。  
 - 返回结果必须有限（10-20条）
 - Token预算严格控制（<10K）
 

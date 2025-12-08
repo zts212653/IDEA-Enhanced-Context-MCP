@@ -49,6 +49,9 @@ export function inferRoles(symbol: SymbolRecord): Role[] {
   const roles = new Set<Role>();
   const annotations = collectAnnotations(symbol);
   const lowerFqn = symbol.fqn.toLowerCase();
+  const simpleName = getSimpleName(symbol.fqn);
+  const lowerSimple = simpleName.toLowerCase();
+  const packageName = (symbol.packageName ?? "").toLowerCase();
   const metadataRole = extractMetadataRole(symbol);
   if (metadataRole) {
     roles.add(metadataRole);
@@ -65,19 +68,34 @@ export function inferRoles(symbol: SymbolRecord): Role[] {
   if (/test/i.test(symbol.fqn) || isTestPath(symbol)) {
     roles.add("TEST");
   }
-  if (/repository/i.test(symbol.fqn)) {
+  const isMapperLike =
+    /mapper$/i.test(simpleName) &&
+    !/objectmapper/i.test(simpleName) &&
+    !/modelmapper/i.test(simpleName);
+  const isRepositoryByName = /repository/i.test(simpleName) || isMapperLike;
+  if (isRepositoryByName || packageName.includes(".repository") || packageName.includes(".mapper")) {
     roles.add("REPOSITORY");
   }
-  if (/(controller|resource)/i.test(symbol.fqn)) {
+  const hasRestAnnotation = annotations.some((ann) => /(rest)?controller$/.test(ann));
+  const isRestControllerName =
+    /controller$/i.test(simpleName) &&
+    !/controlleradvice$/i.test(simpleName) &&
+    !/test$/i.test(simpleName);
+  if (hasRestAnnotation || isRestControllerName || packageName.includes(".controller")) {
     roles.add("REST_CONTROLLER");
   }
-  if (/(dto|mapper)/i.test(symbol.fqn)) {
+  if (
+    /dto$/i.test(simpleName) ||
+    /\bdto\b/i.test(simpleName) ||
+    /(request|response)$/i.test(simpleName)
+  ) {
     roles.add("DTO");
   }
-  if (/(config)/i.test(symbol.fqn)) {
+  const isConfigByName = /config(uration)?$/i.test(simpleName);
+  if (isConfigByName || packageName.includes(".config")) {
     roles.add("CONFIG");
   }
-  if (/(service)/i.test(symbol.fqn)) {
+  if (/service$/i.test(simpleName) || annotations.some((ann) => /service$/.test(ann))) {
     roles.add("SPRING_BEAN");
   }
   if (/entity|domain|model/i.test(symbol.fqn) || isEntityPath(symbol)) {
@@ -106,6 +124,11 @@ function collectAnnotations(symbol: SymbolRecord): string[] {
     }
   }
   return annotations;
+}
+
+function getSimpleName(fqn: string): string {
+  const parts = fqn.split(".");
+  return parts[parts.length - 1] ?? fqn;
 }
 
 function extractMetadataRole(symbol: SymbolRecord): Role | undefined {

@@ -135,9 +135,13 @@ def main():
         return
 
     print(f"Inserting {len(rows)} rows into Milvus...")
+    inserted = 0
     for batch_start in range(0, len(rows), 64):
         batch = rows[batch_start : batch_start + 64]
         collection.insert(batch)
+        inserted += len(batch)
+        if inserted % 512 == 0 or inserted == len(rows):
+            print(f"  inserted {inserted}/{len(rows)} in current chunk")
 
     collection.load()
     print("Milvus ingestion done.")

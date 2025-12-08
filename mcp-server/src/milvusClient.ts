@@ -18,8 +18,25 @@ async function generateEmbedding(
   text: string,
   model: string,
   host: string,
+  provider = "ollama",
+  task = "retrieval.query",
 ): Promise<number[] | undefined> {
   try {
+    if (provider.toLowerCase() === "jina") {
+      const response = await fetch(new URL("/embed", host), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inputs: text, instruction: task }),
+      });
+      if (!response.ok) {
+        throw new Error(
+          `Embedding request failed (${response.status}) ${await response.text()}`,
+        );
+      }
+      const json = (await response.json()) as { embeddings?: number[][] };
+      return Array.isArray(json.embeddings) ? json.embeddings[0] : undefined;
+    }
+
     const response = await fetch(new URL("/api/embeddings", host), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -222,6 +239,8 @@ export function createMilvusSearchClient(): MilvusSearchHandle | undefined {
         args.query,
         config.embeddingModel,
         config.embeddingHost,
+        config.embeddingProvider,
+        config.embeddingTaskQuery,
       );
 
       if (!embedding) {
@@ -236,7 +255,7 @@ export function createMilvusSearchClient(): MilvusSearchHandle | undefined {
           vectorField: config.vectorField,
           vector: embedding,
           limit,
-          moduleFilter: args.moduleFilter,
+          moduleFilter: args.moduleFilter ?? args.moduleHint,
           levels: args.preferredLevels ?? ["class", "method"],
           milvusAddress: config.address,
           metricType: config.metricType,

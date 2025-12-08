@@ -4,7 +4,35 @@ export async function generateEmbedding(
   text: string,
   model: string,
   host: string,
+  provider = "ollama",
+  task = "retrieval.passage",
 ): Promise<number[]> {
+  const normalizedProvider = provider.toLowerCase();
+  if (normalizedProvider === "jina") {
+    const response = await fetch(new URL("/embed", host), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        inputs: text,
+        instruction: task,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Embedding request failed (${response.status}) ${await response.text()}`,
+      );
+    }
+    const json = (await response.json()) as { embeddings?: number[][] };
+    const embedding = Array.isArray(json.embeddings) ? json.embeddings[0] : undefined;
+    if (!embedding) {
+      throw new Error("Embedding response missing 'embeddings' field");
+    }
+    return embedding;
+  }
+
+  // Default: Ollama/OpenAI-compatible
   const response = await fetch(new URL("/api/embeddings", host), {
     method: "POST",
     headers: {

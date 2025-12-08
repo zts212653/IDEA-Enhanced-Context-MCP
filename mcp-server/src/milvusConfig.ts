@@ -5,6 +5,8 @@ export interface MilvusResolvedConfig {
   metricType: string;
   searchParams: Record<string, number | string>;
   outputFields: string[];
+  embeddingProvider: string;
+  embeddingTaskQuery: string;
   embeddingModel: string;
   embeddingHost: string;
 }
@@ -41,6 +43,10 @@ export function resolveMilvusConfig():
       "metadata",
       "fqn",
     ],
+    embeddingProvider:
+      process.env.EMBEDDING_PROVIDER?.toLowerCase() ?? "ollama",
+    embeddingTaskQuery:
+      process.env.EMBEDDING_TASK_QUERY ?? "retrieval.query",
     embeddingModel:
       process.env.IEC_EMBED_MODEL ??
       process.env.EMBED_MODEL ??
