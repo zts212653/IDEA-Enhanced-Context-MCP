@@ -63,6 +63,21 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 
 ---
 
+### Codex Pass 42: Default reranker -> v3 base, local MPS server
+
+**What**:
+- 将 rerank 默认模型改为 `jina-reranker-v3-base`（仍可通过 env 覆盖）。本地自托管脚本 `scripts/jina_reranker_server.py` 支持 MPS，默认端口 7998；在无 HF token 场景下可用 `MODEL=jinaai/jina-reranker-v2-base-multilingual` 启动并已验证 curl。
+- 更新 `doc/MILESTONE_R_RERANK_PLAN.md` 备注本地托管与模型选择。
+
+**Why**:
+- 对齐最新 Jina 模型，同时提供本地无外网依赖的测试路径。
+
+**Testing**:
+- `cd mcp-server && npm run build`
+- 本地启动 reranker：`HOST=127.0.0.1 PORT=7998 MODEL=jinaai/jina-reranker-v2-base-multilingual DEVICE=mps ./.venv/bin/python scripts/jina_reranker_server.py`（后台运行），`curl /rerank` 返回有效结果。
+
+---
+
 ## 2025-12-02
 
 ### Claude Code Pass 1: Milestone C Verification Test Suite

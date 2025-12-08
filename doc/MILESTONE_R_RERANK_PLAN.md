@@ -70,6 +70,7 @@
 - **上线**：保持默认关闭；若效果确认，可在特定 profile（impact_analysis）先行开启，再扩展到 generic。  
 - **成本/延迟**：`RERANK_MAX_CANDIDATES` 与超时时间需平衡（建议 <150ms 模型 + <200ms 网络，否则关闭）。  
   - 当前首选 provider：`jina-reranker-v3-base`（RERANK_PROVIDER=jina），默认 endpoint `https://api.jina.ai/v1/rerank`，支持自定义 host。  
+  - 本地自托管（MPS）：`python scripts/jina_reranker_server.py`，可选 `HOST/PORT/MODEL/DEVICE/BATCH_SIZE`。由于 `jina-reranker-v3-base` 需鉴权，本地默认可用 `MODEL=jinaai/jina-reranker-v2-base-multilingual`；启动后配合 `RERANK_HOST=http://127.0.0.1:7998`、`RERANK_MODEL=jinaai/jina-reranker-v2-base-multilingual` 进行测试。
 
 ## 8. 后续落地任务（分步骤）
 1) 配置读取与 flag 判定（不改变默认行为）。  
