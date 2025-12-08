@@ -47,6 +47,7 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 
 **What**:
 - 新增 `mcp-server/src/rerankClient.ts` 及 `searchPipeline` hook：读取 `RERANK_*` 环境开关，默认关闭；支持 Jina reranker 端点（`https://api.jina.ai/v1/rerank`，模型默认 `jina-reranker-v2-base-en`），超时/错误回退原排序。
+  - 默认模型更新为 `jina-reranker-v3-base`（保持 endpoint 不变，可自定义 host/模型）。
 - Rerank 输入包含 fqn/summary/kind/indexLevel/module/roles/callers&callees/moduleSummary/libraryRole/isTest，限制候选数与重排 TopK 可配置。
 - `SearchOutcome` 增加 `rerankUsed` 标记；保持上下文预算逻辑不变。
 - 在 `doc/MILESTONE_R_RERANK_PLAN.md` 备注首选 provider。

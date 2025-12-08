@@ -69,7 +69,7 @@ class JinaReranker implements Reranker {
 
   constructor(config: RerankConfig) {
     this.endpoint = config.host ?? "https://api.jina.ai/v1/rerank";
-    this.model = config.model ?? "jina-reranker-v2-base-en";
+    this.model = config.model ?? "jina-reranker-v3-base";
     this.apiKey = config.apiKey;
     this.timeoutMs = config.timeoutMs;
     this.logProbes = config.logProbes;
