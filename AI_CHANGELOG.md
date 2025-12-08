@@ -25,6 +25,24 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 
 ---
 
+### Codex Pass 40: Milestone R rerank 设计稿 + 分支
+
+**What**:
+- 创建 `milestone-r` 分支，撰写 rerank 设计草案 `doc/MILESTONE_R_RERANK_PLAN.md`：默认关闭的可插拔 rerank stage、env feature flag、输入模板（roles/callersCount/moduleSummary/libraryRole 等）、回退策略与实验基线（Hit@K/NDCG、AOP/BPP/事件/WebFlux/JDBC/订单影响/Petclinic）。
+- 在 `BACKLOG.md` 标记 R1 “插拔式 rerank 结构”设计完成（未落地代码）。
+- 在 `doc/SCENARIO_orders_impact.md` 补充新信号对场景影响说明。
+
+**Why**:
+- 准备 Milestone R 实验，确保默认行为不变，同时明确开关、评测方法与输入特征。
+
+**Testing**:
+- 文档变更，无代码执行。
+
+**Notes**:
+- 代码未改动默认行为；后续实现需要按设计加 flag 守护。
+
+---
+
 ## 2025-12-02
 
 ### Claude Code Pass 1: Milestone C Verification Test Suite

@@ -195,7 +195,7 @@
 
 > 目标：在现有“向量召回 + 规则/元数据”基础上，引入可插拔的 rerank 模型，逐步用模型吸收角色/关系/库标签等信号，减少硬编码、提高多仓泛化。
 
-- [ ] R1 插拔式 rerank 结构
+- [x] R1 插拔式 rerank 结构（设计稿：`doc/MILESTONE_R_RERANK_PLAN.md`，默认关闭，尚未落地代码）
   - 在 Milvus top-N 之后新增可选 rerank stage（env 开关），输入包含：候选文本、角色、callers/callees 计数、module/repo、HTTP/MQ/DB 分类等元数据。
   - 支持 provider 配置（RERANK_PROVIDER/RERANK_HOST/RERANK_MODEL），默认关闭以保证兼容。
   - 先用现成 cross-encoder（如 bge-reranker-large/jina-reranker-v1）验证，不修改现有召回/过滤。
