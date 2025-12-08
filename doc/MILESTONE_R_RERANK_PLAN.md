@@ -69,6 +69,7 @@
 - **回退**：任何错误/超时自动回退原排序，结果字段可附 `rerankUsed: boolean`。  
 - **上线**：保持默认关闭；若效果确认，可在特定 profile（impact_analysis）先行开启，再扩展到 generic。  
 - **成本/延迟**：`RERANK_MAX_CANDIDATES` 与超时时间需平衡（建议 <150ms 模型 + <200ms 网络，否则关闭）。  
+  - 当前首选 provider：`jina-reranker-v2-base-en`（RERANK_PROVIDER=jina），默认 endpoint `https://api.jina.ai/v1/rerank`，支持自定义 host。  
 
 ## 8. 后续落地任务（分步骤）
 1) 配置读取与 flag 判定（不改变默认行为）。  

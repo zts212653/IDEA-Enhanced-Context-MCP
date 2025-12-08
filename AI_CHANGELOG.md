@@ -43,6 +43,25 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 
 ---
 
+### Codex Pass 41: Rerank hook scaffolding (flagged, default off)
+
+**What**:
+- 新增 `mcp-server/src/rerankClient.ts` 及 `searchPipeline` hook：读取 `RERANK_*` 环境开关，默认关闭；支持 Jina reranker 端点（`https://api.jina.ai/v1/rerank`，模型默认 `jina-reranker-v2-base-en`），超时/错误回退原排序。
+- Rerank 输入包含 fqn/summary/kind/indexLevel/module/roles/callers&callees/moduleSummary/libraryRole/isTest，限制候选数与重排 TopK 可配置。
+- `SearchOutcome` 增加 `rerankUsed` 标记；保持上下文预算逻辑不变。
+- 在 `doc/MILESTONE_R_RERANK_PLAN.md` 备注首选 provider。
+
+**Why**:
+- 为 Milestone R 启用可插拔 rerank 实验，保证默认行为不变并可快速 A/B。
+
+**Testing**:
+- `cd mcp-server && npm run build`
+
+**Notes**:
+- 未启用开关时无行为变化；需要设置 `RERANK_ENABLED=1` 等 env 才会调用外部服务。
+
+---
+
 ## 2025-12-02
 
 ### Claude Code Pass 1: Milestone C Verification Test Suite

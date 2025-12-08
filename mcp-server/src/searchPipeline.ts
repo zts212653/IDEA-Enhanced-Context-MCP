@@ -3,6 +3,11 @@ import path from "node:path";
 
 import type { IdeaBridgeClient } from "./bridgeClient.js";
 import { FixtureRegistry } from "./fixtureRegistry.js";
+import {
+  createReranker,
+  loadRerankConfig,
+  type RerankCandidate,
+} from "./rerankClient.js";
 import type { SearchHit, SymbolRecord } from "./types.js";
 import { inferRoles, type Role } from "./semanticRoles.js";
 
@@ -121,6 +126,7 @@ export type SearchOutcome = {
   stages: SearchStage[];
   strategy: SearchStrategy;
   contextBudget: ContextBudgetReport;
+  rerankUsed?: boolean;
 };
 
 export type ContextBudgetReport = {
@@ -1526,6 +1532,69 @@ function applyRoleBoosts(
   return scored;
 }
 
+function buildRerankText(hit: AnnotatedHit): string {
+  const roles = (hit.inferredRoles ?? []).join(",");
+  const moduleSummary = summarizeModuleCounts(hit.metadata?.moduleSummary);
+  const lib = [
+    hit.metadata?.library ? `library=${hit.metadata.library}` : "",
+    hit.metadata?.libraryRole ? `libraryRole=${hit.metadata.libraryRole}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const counters = [
+    typeof hit.metadata?.callersCount === "number"
+      ? `callers=${hit.metadata.callersCount}`
+      : "",
+    typeof hit.metadata?.calleesCount === "number"
+      ? `callees=${hit.metadata.calleesCount}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const moduleInfo = [
+    hit.module ? `module=${hit.module}` : "",
+    hit.repoName ? `repo=${hit.repoName}` : "",
+    moduleSummary ? `modules=${moduleSummary}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return [
+    hit.fqn,
+    hit.summary,
+    `kind=${hit.kind} level=${hit.indexLevel ?? ""}`,
+    moduleInfo,
+    roles ? `roles=${roles}` : "",
+    counters,
+    lib,
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function summarizeModuleCounts(summary: unknown): string {
+  if (!Array.isArray(summary)) return "";
+  return summary
+    .slice(0, 5)
+    .map((item) => {
+      if (!item || typeof item !== "object") return "";
+      const mod = (item as any).module ?? "unknown";
+      const count = (item as any).count ?? "";
+      return `${mod}:${count}`;
+    })
+    .filter(Boolean)
+    .join(",");
+}
+
+function buildRerankCandidates(
+  hits: AnnotatedHit[],
+  maxCandidates: number,
+): RerankCandidate[] {
+  return hits.slice(0, maxCandidates).map((hit, index) => ({
+    id: `${hit.fqn}#${index}`,
+    text: buildRerankText(hit),
+  }));
+}
+
 function extractModuleSpread(summary: unknown): { uniqueModules: number; topCount: number } {
   if (!summary || typeof summary !== "object") return { uniqueModules: 0, topCount: 0 };
   const modules = new Map<string, number>();
@@ -1871,6 +1940,9 @@ export function createSearchPipeline({
   fallbackSymbols: SymbolRecord[];
   fixtureRegistry?: FixtureRegistry;
 }) {
+  const rerankConfig = loadRerankConfig();
+  const reranker = createReranker(rerankConfig);
+
   async function tryBridge(args: SearchArguments) {
     if (!bridgeClient) {
       return undefined;
@@ -2061,7 +2133,65 @@ export function createSearchPipeline({
     const rankedHits = applyRoleBoosts(scenarioHits, profile.roleBoosts, profile.id, {
       modulePreference: strategy.moduleHint ?? args.moduleHint ?? args.moduleFilter ?? null,
     });
-    let budget = applyBudgetStrategy(rankedHits, profile, tokenLimit);
+    let rerankedHits = rankedHits;
+    let rerankUsed = false;
+
+    if (
+      reranker &&
+      rerankConfig.enabled &&
+      rankedHits.length > 1 &&
+      rerankConfig.maxCandidates > 1
+    ) {
+      const candidates = buildRerankCandidates(
+        rankedHits,
+        Math.min(rerankConfig.maxCandidates, rankedHits.length),
+      );
+      if (candidates.length > 1) {
+        try {
+          const started = Date.now();
+          const results = await reranker.rerank(args.query, candidates);
+          const sorted = [...results].sort((a, b) => b.score - a.score);
+          const seen = new Set<string>();
+          const hitMap = new Map<string, AnnotatedHit>();
+          candidates.forEach((cand, idx) => {
+            hitMap.set(cand.id, rankedHits[idx]);
+          });
+          const reranked: AnnotatedHit[] = [];
+          for (const res of sorted.slice(0, rerankConfig.topK)) {
+            const hit = res.id ? hitMap.get(res.id) : undefined;
+            if (hit && !seen.has(hit.fqn)) {
+              reranked.push(hit);
+              seen.add(hit.fqn);
+            }
+          }
+          for (const hit of rankedHits) {
+            if (!seen.has(hit.fqn)) {
+              reranked.push(hit);
+              seen.add(hit.fqn);
+            }
+          }
+          if (reranked.length) {
+            rerankedHits = reranked;
+            rerankUsed = true;
+          }
+          if (rerankConfig.logProbes) {
+            console.error(
+              "[rerank] applied provider=",
+              rerankConfig.provider ?? "jina",
+              "durationMs=",
+              Date.now() - started,
+              "candidates=",
+              candidates.length,
+            );
+          }
+        } catch (error) {
+          if (rerankConfig.logProbes) {
+            console.error("[rerank] failed, using original order", error);
+          }
+        }
+      }
+    }
+    let budget = applyBudgetStrategy(rerankedHits, profile, tokenLimit);
     let fallbackUsed = false;
 
     if (!budget.delivered.length) {
@@ -2079,6 +2209,7 @@ export function createSearchPipeline({
       stages,
       strategy,
       contextBudget: budget,
+      rerankUsed,
     };
   }
 
