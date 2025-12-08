@@ -162,6 +162,12 @@ public class WechatPaymentService implements PaymentService {
 - 这些聚合信号可下沉到 impact 排序（impact_analysis profile）作为权重：callersCount/calleesCount/infraCategory + TEST 惩罚 + moduleHint 过滤。
 - 当前实现已将 `moduleSummary`（callers/callees 按模块计数）和 callersCount/calleesCount 注入 impact 排序，用于优先展示跨模块影响面更大的候选。
 
+## 9. 新增信号对场景的影响（moduleSummary + libraryRole）
+
+- 搜索排序：`impact_analysis` profile 读取 `moduleSummary` + callers/callees 频次，对跨模块调用多的 Service/Mapper/MQ/HTTP 客户端额外加权；结合 moduleHint/moduleFilter，更快把高影响候选放到前列。
+- 调用链工具：`analyze_callers_of_method` / `analyze_callees_of_method` 的 moduleSummary 可以直接看出调用/被调的模块分布，便于判断 blast radius 是否跨服务。
+- 库标签：ingest 已标注 `library`/`libraryRole`（Spring Web/WebFlux/Feign/AMQP/Kafka/JDBC/Jackson 等），后续若 rerank 或文档需要指出外部系统触达，可用该字段过滤/解释“这里走 HTTP/MQ/DB”。
+
 ## 7. 限制与待办
 
 - PSI 目前记录的是 **class 级聚合** 的 calls/references，无 per-method 动态调度；需要在显示时注明。
