@@ -143,7 +143,7 @@
 - [x] 在 Milvus metadata 中增加：
   - [x] `callersCount / calleesCount`（class & method entries 均包含；method 继承 class 级聚合计数）。
   - [x] 简单的 `relationSummary`。
-- [ ] 为后续「影响分析」类工具预留字段（比如 `framework = "wushan-java"` / `isTestCode`）。
+- [x] 为后续「影响分析」类工具预留字段（`framework`/`isTestCode` + `moduleSummary` 聚合 + `library`/`libraryRole` 标签）。
 
 ### C.3 Ranking B.1（与方法级能力同期完成）
 
@@ -186,7 +186,7 @@
     - 若 callee 是接口，会列出实现类（PSI `implements`）供多态扩展点参考。
     - 用 `source` 标记结果来源（`calls` 或 `references`），备注中提示“PSI 目前是 class 聚合，没有 per-method 边”。
 - [x] MCP PSI cache 多仓支持：`analyze_callers_of_method` / `analyze_callees_of_method` / `explain_symbol_behavior` 支持 `psiCachePath` 参数，便于在多个仓库的 PSI 缓存之间切换（默认仍读取 `idea-bridge/.idea-bridge/psi-cache.json` 或 `BRIDGE_PSI_CACHE`）。
-- [ ] 将返回格式对齐 `analyze_callers_of_method` 的分组/频次聚合，并在 impact profile 中结合 callersCount/calleesCount 做排序信号。
+- [x] 将返回格式对齐 `analyze_callers_of_method` 的分组/频次聚合，并在 impact profile 中结合 callersCount/calleesCount + moduleSummary 做排序信号。
 - [ ] 补充 WebMVC 电商下单链示例文档 `doc/SCENARIO_orders_impact.md`，覆盖 Controller→Service→Mapper→MQ + 多态 PaymentService 路径。
 
 ---

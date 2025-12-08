@@ -4,6 +4,27 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 
 ---
 
+## 2025-12-03
+
+### Codex Pass 39: Impact module spread boost + library metadata
+
+**What**:
+- Added module-level aggregation to ingest: build a class FQN→module lookup, emit `moduleSummary` (callers/callees by module) on class/method metadata, and tag library/libraryRole for common Spring/HTTP/MQ/JSON/DB clients.
+- Impact ranking now consumes the new metadata: `impact_analysis` profile boosts symbols touched by more modules and higher caller frequencies, honors moduleHint/moduleFilter preference explicitly, and keeps existing callersCount/calleesCount boosts.
+- Kept callers/callees tool summaries intact while making their moduleSummary usable downstream.
+
+**Files Changed**:
+- `idea-bridge/src/scripts/ingestMilvus.ts`
+- `mcp-server/src/searchPipeline.ts`
+- `doc/SCENARIO_orders_impact.md`
+- `BACKLOG.md`
+
+**Testing**:
+- `cd idea-bridge && npm run build`
+- `cd mcp-server && npm run build`
+
+---
+
 ## 2025-12-02
 
 ### Claude Code Pass 1: Milestone C Verification Test Suite

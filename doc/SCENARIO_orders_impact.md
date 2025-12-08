@@ -160,6 +160,7 @@ public class WechatPaymentService implements PaymentService {
 - 对 `analyze_callees_of_method` 返回的 `implementations`/callersCount 可按模块/实现分组，排序时优先高 callersCount 的实现，用于估算多态扩展点的实际触达面。
 - 对 `analyze_callers_of_method` 可区分 direct calls vs. references，并按模块聚合调用频次，便于 impact 报告“哪些模块会受影响、调用频度如何”。
 - 这些聚合信号可下沉到 impact 排序（impact_analysis profile）作为权重：callersCount/calleesCount/infraCategory + TEST 惩罚 + moduleHint 过滤。
+- 当前实现已将 `moduleSummary`（callers/callees 按模块计数）和 callersCount/calleesCount 注入 impact 排序，用于优先展示跨模块影响面更大的候选。
 
 ## 7. 限制与待办
 

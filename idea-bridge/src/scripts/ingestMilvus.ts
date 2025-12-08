@@ -35,6 +35,11 @@ type ModuleGroup = {
   classes: SymbolRecord[];
 };
 
+type ModuleCount = {
+  module: string;
+  count: number;
+};
+
 function adjustVectorLength(vector: number[], dimension: number): number[] {
   if (vector.length === dimension) return vector;
   if (vector.length > dimension) {
@@ -87,21 +92,118 @@ function vectorNorm(vec: number[]): number {
   return Math.sqrt(sum);
 }
 
+function buildModuleLookup(records: SymbolRecord[]) {
+  const map = new Map<string, string>();
+  for (const record of records) {
+    if (!record?.fqn) continue;
+    map.set(record.fqn, record.module ?? "unknown");
+  }
+  return map;
+}
+
+function summarizeModules(
+  fqns: string[] | undefined,
+  moduleMap: Map<string, string>,
+): ModuleCount[] {
+  if (!fqns?.length) return [];
+  const counts = new Map<string, number>();
+  for (const fqn of fqns) {
+    if (!fqn) continue;
+    const module = moduleMap.get(fqn) ?? "unknown";
+    counts.set(module, (counts.get(module) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([module, count]) => ({ module, count }))
+    .sort((a, b) => b.count - a.count || a.module.localeCompare(b.module));
+}
+
+function buildModuleSummary(
+  relations: SymbolRecord["relations"],
+  moduleMap: Map<string, string>,
+): { callers?: ModuleCount[]; callees?: ModuleCount[] } | undefined {
+  const callers = summarizeModules(relations?.calledBy, moduleMap);
+  const callees = summarizeModules(relations?.calls, moduleMap);
+  if (!callers.length && !callees.length) return undefined;
+  return {
+    callers: truncateArray(callers, 12),
+    callees: truncateArray(callees, 12),
+  };
+}
+
+function detectLibraryTags(symbol: SymbolRecord): {
+  library?: string;
+  libraryRole?: string;
+} {
+  const pkg = (symbol.packageName ?? "").toLowerCase();
+  const fqn = symbol.fqn.toLowerCase();
+  const module = (symbol.module ?? "").toLowerCase();
+  const has = (needle: string) =>
+    pkg.includes(needle) || fqn.includes(needle) || module.includes(needle);
+
+  let library: string | undefined;
+  let libraryRole: string | undefined;
+
+  if (has("org.springframework")) {
+    library = "spring";
+  }
+  if (has("webflux") || has("web.reactive") || has("webclient")) {
+    library = library ?? "spring-webflux";
+    libraryRole = libraryRole ?? "http-client";
+  } else if (has("resttemplate") || has("rest.operations")) {
+    library = library ?? "spring-web";
+    libraryRole = libraryRole ?? "http-client";
+  } else if (has("feign")) {
+    library = library ?? "feign";
+    libraryRole = libraryRole ?? "http-client";
+  }
+
+  if (has("kafka")) {
+    library = library ?? "kafka";
+    libraryRole = libraryRole ?? "mq-client";
+  } else if (has("rabbit") || has("amqp")) {
+    library = library ?? "rabbitmq";
+    libraryRole = libraryRole ?? "mq-client";
+  }
+
+  if (has("jackson")) {
+    library = library ?? "jackson";
+    libraryRole = libraryRole ?? "json-serde";
+  }
+
+  if (has("jdbc")) {
+    library = library ?? "jdbc";
+    libraryRole = libraryRole ?? "db-client";
+  }
+
+  if (has("reactor.netty") || has("netty")) {
+    library = library ?? "reactor-netty";
+    libraryRole = libraryRole ?? "reactive-transport";
+  }
+
+  if (has("webclient") || has("httpclient") || has("okhttp")) {
+    library = library ?? "http-client";
+    libraryRole = libraryRole ?? "http-client";
+  }
+
+  return { library, libraryRole };
+}
+
 function buildIndexEntries(records: SymbolRecord[]): IndexEntry[] {
   if (records.length === 0) return [];
 
   const repoName = records[0].repoName;
   const entries: IndexEntry[] = [];
   const modules = groupByModule(records);
+  const moduleMap = buildModuleLookup(records);
 
   entries.push(buildRepoEntry(repoName, modules, records.length));
   for (const mod of modules.values()) {
     entries.push(buildModuleEntry(repoName, mod));
   }
   for (const symbol of records) {
-    entries.push(buildClassEntry(symbol));
+    entries.push(buildClassEntry(symbol, moduleMap));
     for (const method of symbol.methods) {
-      entries.push(buildMethodEntry(symbol, method));
+      entries.push(buildMethodEntry(symbol, method, moduleMap));
     }
   }
 
@@ -243,7 +345,10 @@ function buildModuleEntry(repoName: string, module: ModuleGroup): IndexEntry {
   };
 }
 
-function buildClassEntry(symbol: SymbolRecord): IndexEntry {
+function buildClassEntry(
+  symbol: SymbolRecord,
+  moduleMap: Map<string, string>,
+): IndexEntry {
   const callersCount = symbol.relations?.calledBy?.length ?? 0;
   const calleesCount = symbol.relations?.calls?.length ?? 0;
   const referencesCount = symbol.relations?.references?.length ?? 0;
@@ -255,12 +360,16 @@ function buildClassEntry(symbol: SymbolRecord): IndexEntry {
           referencesCount,
         }
       : undefined;
+  const moduleSummary = buildModuleSummary(symbol.relations, moduleMap);
+  const libraryTags = detectLibraryTags(symbol);
 
   const metadata = {
     module: symbol.module,
     modulePath: symbol.modulePath,
     package: symbol.packageName,
     framework: symbol.repoName,
+    library: libraryTags.library,
+    libraryRole: libraryTags.libraryRole,
     annotations: truncateArray(symbol.annotations.map((ann) => ann.fqn ?? ann.name)),
     fields: truncateArray(symbol.fields.map((field) => field.name)),
     methods: truncateArray(symbol.methods.map((method) => method.signature)),
@@ -279,6 +388,7 @@ function buildClassEntry(symbol: SymbolRecord): IndexEntry {
     calleesCount: calleesCount || undefined,
     referencesCount: referencesCount || undefined,
     relationSummary,
+    moduleSummary,
   };
 
   return {
@@ -296,7 +406,11 @@ function buildClassEntry(symbol: SymbolRecord): IndexEntry {
   };
 }
 
-function buildMethodEntry(symbol: SymbolRecord, method: MethodInfo): IndexEntry {
+function buildMethodEntry(
+  symbol: SymbolRecord,
+  method: MethodInfo,
+  moduleMap: Map<string, string>,
+): IndexEntry {
   const callersCount = symbol.relations?.calledBy?.length ?? 0;
   const calleesCount = symbol.relations?.calls?.length ?? 0;
   const referencesCount = symbol.relations?.references?.length ?? 0;
@@ -308,11 +422,15 @@ function buildMethodEntry(symbol: SymbolRecord, method: MethodInfo): IndexEntry 
           referencesCount,
         }
       : undefined;
+  const moduleSummary = buildModuleSummary(symbol.relations, moduleMap);
+  const libraryTags = detectLibraryTags(symbol);
 
   const metadata = {
     class: symbol.fqn,
     module: symbol.module,
     framework: symbol.repoName,
+    library: libraryTags.library,
+    libraryRole: libraryTags.libraryRole,
     parameters: method.parameters,
     returnType: method.returnTypeFqn ?? method.returnType,
     annotations: method.annotations?.map((ann) => ann.fqn ?? ann.name),
@@ -325,6 +443,7 @@ function buildMethodEntry(symbol: SymbolRecord, method: MethodInfo): IndexEntry 
     calleesCount: calleesCount || undefined,
     referencesCount: referencesCount || undefined,
     relationSummary,
+    moduleSummary,
   };
 
   const embeddingText = [

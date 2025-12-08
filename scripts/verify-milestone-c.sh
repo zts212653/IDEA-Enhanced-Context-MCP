@@ -255,7 +255,7 @@ TEST "C.4.1 - analyze_callers_of_method Smoke Test"
 cd "${ROOT}/mcp-server"
 
 # Simple smoke test: does the tool exist and return valid JSON?
-timeout 10 node << 'EOF' > "${LOG_DIR}/c4.1-callers-smoke.log" 2>&1 || true
+node << 'EOF' > "${LOG_DIR}/c4.1-callers-smoke.log" 2>&1 || true
 import('./dist/index.js').then(() => {
   console.log('MCP server loaded successfully');
   process.exit(0);

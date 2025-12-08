@@ -1514,19 +1514,50 @@ function applyRoleBoosts(
   hits: AnnotatedHit[],
   boosts?: Partial<Record<Role, number>>,
   profileId?: string,
+  options?: { modulePreference?: string | null },
 ): AnnotatedHit[] {
   if (!boosts) return hits;
   const scored = [...hits];
   scored.sort(
-    (a, b) => getBoostedScore(b, boosts, profileId) - getBoostedScore(a, boosts, profileId),
+    (a, b) =>
+      getBoostedScore(b, boosts, profileId, options) -
+      getBoostedScore(a, boosts, profileId, options),
   );
   return scored;
+}
+
+function extractModuleSpread(summary: unknown): { uniqueModules: number; topCount: number } {
+  if (!summary || typeof summary !== "object") return { uniqueModules: 0, topCount: 0 };
+  const modules = new Map<string, number>();
+  const track = (list?: any) => {
+    if (!Array.isArray(list)) return;
+    for (const item of list) {
+      if (!item) continue;
+      const name = typeof item.module === "string" ? item.module : "unknown";
+      const count = typeof item.count === "number" ? item.count : 1;
+      modules.set(name, (modules.get(name) ?? 0) + count);
+    }
+  };
+
+  const summaryObj = summary as Record<string, unknown>;
+  track(summaryObj.callers);
+  track(summaryObj.callees);
+  if (!modules.size && Array.isArray(summary)) {
+    track(summary);
+  }
+
+  let topCount = 0;
+  for (const count of modules.values()) {
+    if (count > topCount) topCount = count;
+  }
+  return { uniqueModules: modules.size, topCount };
 }
 
 function getBoostedScore(
   hit: AnnotatedHit,
   boosts: Partial<Record<Role, number>>,
   profileId?: string,
+  options?: { modulePreference?: string | null },
 ): number {
   let base = hit.score ?? 0;
   const bonus = (hit.inferredRoles ?? []).reduce((acc, role) => {
@@ -1538,6 +1569,10 @@ function getBoostedScore(
   const calleesCount =
     typeof metadata.calleesCount === "number" ? metadata.calleesCount : 0;
   const fqnLower = hit.fqn.toLowerCase();
+  const modulePreference = options?.modulePreference
+    ? options.modulePreference.toLowerCase()
+    : null;
+  const moduleSpread = extractModuleSpread(metadata.moduleSummary);
 
   // Impact-style boost: heavily-used or central classes score higher.
   const impactBoost =
@@ -1550,6 +1585,9 @@ function getBoostedScore(
     if (category === "HTTP") infraBoost = 0.12;
     else if (category === "MQ") infraBoost = 0.12;
     else if (category === "DB") infraBoost = 0.1;
+    if (modulePreference && hit.module?.toLowerCase() === modulePreference) {
+      infraBoost += 0.05;
+    }
   }
 
   // Additional penalty for test symbols in impact-style scenarios.
@@ -1564,9 +1602,18 @@ function getBoostedScore(
     const isMapper =
       hasRole(hit, "REPOSITORY") &&
       (/\bmapper$/i.test(hit.fqn) || /\bmapper\b/i.test(fqnLower));
+    // Prefer production calls: more callers/callees push impact up; deprioritize tests already via penalty.
     if (isRest) structuralBoost += 0.12;
     if (isServiceLike) structuralBoost += 0.08;
     if (isMapper) structuralBoost += 0.08;
+    // Higher callersCount gets additional small lift (beyond log boost) to spread impact signals.
+    structuralBoost += Math.min(callersCount, 20) * 0.005;
+    if (moduleSpread.uniqueModules > 1) {
+      structuralBoost += Math.min(moduleSpread.uniqueModules, 8) * 0.01;
+    }
+    if (moduleSpread.topCount > 0) {
+      structuralBoost += Math.min(moduleSpread.topCount, 12) * 0.003;
+    }
   }
 
   return base + bonus + impactBoost + infraBoost + structuralBoost + testImpactPenalty;
@@ -2011,7 +2058,9 @@ export function createSearchPipeline({
       entityHint: strategy.entityHint,
       moduleHint: strategy.moduleHint ?? args.moduleHint ?? null,
     });
-    const rankedHits = applyRoleBoosts(scenarioHits, profile.roleBoosts, profile.id);
+    const rankedHits = applyRoleBoosts(scenarioHits, profile.roleBoosts, profile.id, {
+      modulePreference: strategy.moduleHint ?? args.moduleHint ?? args.moduleFilter ?? null,
+    });
     let budget = applyBudgetStrategy(rankedHits, profile, tokenLimit);
     let fallbackUsed = false;
 
