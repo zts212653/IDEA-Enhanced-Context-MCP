@@ -78,6 +78,21 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 
 ---
 
+### Codex Pass 46: Fix rerank endpoint path and verify hook fires
+
+**What**:
+- 修正 rerank 客户端默认 endpoint 拼接：若 `RERANK_HOST` 未含 `/rerank` 自动追加，避免本地/自托管服务 404。
+- 开启 rerank（本地 MLX v3）运行单次搜索，`RERANK_LOG_PROBES=1` 日志显示 `rerank:jina count=10`，确认 hook 被触发。
+
+**Why**:
+- 之前本地 rerank 未必生效（缺少 `/rerank` 路径），需确保实验开关真正调用服务。
+
+**Testing**:
+- `cd mcp-server && npm run build`
+- `PATH=.venv/bin:$PATH RERANK_ENABLED=1 RERANK_HOST=http://127.0.0.1:7998 RERANK_MODEL=jina-reranker-v3-mlx RERANK_LOG_PROBES=1 node mcp-server/scripts/run-mcp-search.mjs "How does Spring AOP create dynamic proxies?"` → rerank 日志出现。
+
+---
+
 ## 2025-12-02
 
 ### Claude Code Pass 1: Milestone C Verification Test Suite
