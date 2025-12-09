@@ -531,6 +531,94 @@ EOF
   else
     FAIL "JdbcTemplate RowMapper ranking needs improvement"
   fi
+
+  # ---------------------------------------------------------------------------
+  # Tier 3: Impact Blast Radius (callers)
+  # ---------------------------------------------------------------------------
+  SECTION "Tier 3: Impact Blast Radius"
+
+  impact_case() {
+    local name="$1"
+    local method="$2"
+    local min_callers="$3"
+    local min_modules="$4"
+    local outfile="${LOG_DIR}/impact-${name}.json"
+
+    (cd "${ROOT}/mcp-server" && node << EOF) > "${outfile}" 2>&1 || exit 1
+import('./dist/index.js').then((m) => {
+  const res = m.analyzeCallersInPsiCache({
+    methodFqn: '${method}',
+    excludeTest: true,
+    maxResults: 500,
+  });
+  console.log(JSON.stringify(res, null, 2));
+}).catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+EOF
+
+    if [[ $? -ne 0 ]]; then
+      echo "❌ FAIL: ${name} - MCP call errored" >&2
+      return 1
+    fi
+
+    if IMPACT_OUT="${outfile}" python3 << EOF
+import json, sys, re, os
+outfile = os.environ.get("IMPACT_OUT")
+raw = open(outfile).read()
+start = raw.find("{")
+if start == -1:
+    print("parse-error")
+    sys.exit(1)
+data = json.loads(raw[start:])
+callers = len(data.get("callers", []))
+modules = len(data.get("moduleSummary", []))
+print(callers, modules)
+sys.exit(0 if (callers >= ${min_callers} and modules >= ${min_modules}) else 2)
+EOF
+    then
+      counts=$(IMPACT_OUT="${outfile}" python3 - << 'EOF'
+import json, os
+raw = open(os.environ["IMPACT_OUT"]).read()
+start = raw.find("{")
+data = json.loads(raw[start:])
+print(f"callers={len(data.get('callers', []))} modules={len(data.get('moduleSummary', []))}")
+EOF
+)
+      echo "✅ PASS: ${name} - ${counts}"
+    else
+      rc=$?
+      if [[ $rc -eq 2 ]]; then
+        IMPACT_OUT="${outfile}" python3 - << 'EOF'
+import json, os
+raw = open(os.environ["IMPACT_OUT"]).read()
+start = raw.find("{")
+data = json.loads(raw[start:])
+print(f"callers={len(data.get('callers', []))}, modules={len(data.get('moduleSummary', []))}")
+EOF
+        echo "❌ FAIL: ${name} - thresholds not met (need callers>=${min_callers}, modules>=${min_modules})" >&2
+      else
+        echo "❌ FAIL: ${name} - unable to parse output" >&2
+      fi
+      return 1
+    fi
+  }
+
+  TEST "C.6.1 - Impact: JdbcTemplate#query"
+  impact_case "jdbc-template" "org.springframework.jdbc.core.JdbcTemplate#query" 8 1
+
+  TEST "C.6.2 - Impact: ApplicationContext#getBean"
+  impact_case "app-context" "org.springframework.context.ApplicationContext#getBean" 10 1
+
+  TEST "C.6.3 - Impact: RestTemplate#exchange"
+  impact_case "rest-template" "org.springframework.web.client.RestTemplate#exchange" 2 1
+
+  TEST "C.6.4 - Impact: RabbitTemplate#convertAndSend"
+  impact_case "rabbit-template" "org.springframework.amqp.rabbit.core.RabbitTemplate#convertAndSend" 0 0
+
+  TEST "C.6.5 - Impact: ApplicationEventPublisher#publishEvent"
+  impact_case "event-publish" "org.springframework.context.ApplicationEventPublisher#publishEvent" 1 1
 fi
 
 # ============================================================================

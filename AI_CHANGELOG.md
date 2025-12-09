@@ -93,6 +93,22 @@ This file tracks modifications made by AI agents (Claude Code, Codex, etc.) to m
 
 ---
 
+### Codex Pass 47: Add impact blast-radius regression cases
+
+**What**:
+- `scripts/verify-milestone-c.sh` 增加 Tier 3 五个影响面用例（MCP `analyzeCallersInPsiCache`）：JdbcTemplate#query、ApplicationContext#getBean、RestTemplate#exchange、RabbitTemplate#convertAndSend、ApplicationEventPublisher#publishEvent，验证能列出调用方数量和模块分布（低阈值，确保结果存在）。
+- 在 MCP dist 导出 `analyzeCallersInPsiCache`/`analyzeCalleesInPsiCache`/`explainBehaviorInPsiCache` 以便 CLI/脚本调用。
+- 全套回归（含新用例）再次 10/10 通过。
+
+**Why**:
+- 增强回归覆盖“接口变更影响面”场景，验证 MCP 工具可报告上下游调用方。
+
+**Testing**:
+- `cd mcp-server && npm run build`
+- `scripts/verify-milestone-c.sh --full` ✅（含新 impact 用例）
+
+---
+
 ## 2025-12-02
 
 ### Claude Code Pass 1: Milestone C Verification Test Suite

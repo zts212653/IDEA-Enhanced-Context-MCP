@@ -1307,6 +1307,13 @@ function explainBehaviorInPsiCache(
   };
 }
 
+// Export internals for CLI/testing usage.
+export {
+  analyzeCallersInPsiCache,
+  analyzeCalleesInPsiCache,
+  explainBehaviorInPsiCache,
+};
+
 const searchToolDefinition = {
   title: "IDEA staged semantic search",
   description:
