@@ -4,6 +4,12 @@
 
 ---
 
+## 给新加入的 Agent（快速找回上下文）
+- 先读：`AGENTS.md`、`AGENTS_CONTRIBUTING.md`、`AI_CHANGELOG.md`、`doc/VISION_BACKGROUND.md`、`doc/VISION_ACTIONS.md`、本 `BACKLOG.md`。
+- 看状态：`git status -sb`，`git log -5`，`scripts/verify-milestone-c.sh --full`（默认 Jina 集合）是否通过。
+- 服务/集合：Jina embedding 本地 7997（默认）；rerank MLX v3 本地 7998（默认关，需 `RERANK_ENABLED=1`）；Milvus 默认集合 `idea_symbols_spring_jina`，Nomic 集合存在但未复核。
+- 时间紧就聚焦 Phase 1 P0：renderer v2、module 补全、token boost、1024 维 A/B+rerank、影响面输出增强。
+
 ## 0. 当前快照
 - **能力**：method/class 索引；工具 `search_java_symbol`、`analyze_callers_of_method`、`analyze_callees_of_method`、`explain_symbol_behavior`；rerank hook（默认关，支持本地 MLX v3/Jina API）；回归 `scripts/verify-milestone-c.sh --full`（含 Tier3 影响面基线）全部通过。
 - **数据**：Milvus 集合 `idea_symbols_spring_jina`(1024)、`idea_symbols`/`idea_symbols_spring_nomic`(3584) 等；Nomic 集合存在但质量未复核。
